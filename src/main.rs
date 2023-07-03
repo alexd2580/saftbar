@@ -1,4 +1,9 @@
-use std::{cmp::Ordering, ops::Deref};
+use std::{
+    cmp::Ordering,
+    ffi::c_uchar,
+    ops::Deref,
+    ptr::{null, null_mut},
+};
 
 use xcb::Xid;
 
@@ -43,6 +48,34 @@ fn compare_rectangles(a: &xcb::x::Rectangle, b: &xcb::x::Rectangle) -> Ordering 
     }
 }
 
+struct XftDraw {
+    draw: *mut x11::xft::XftDraw,
+    color: x11::xft::XftColor,
+    font: *mut x11::xft::XftFont,
+}
+
+impl XftDraw {
+    fn draw_string(&mut self, text: &str) {
+        unsafe {
+            x11::xft::XftDrawString8(
+                self.draw,
+                &mut self.color as *mut x11::xft::XftColor,
+                self.font,
+                0,
+                10,
+                text.as_ptr() as *const c_uchar,
+                text.len() as i32,
+            )
+        };
+    }
+}
+
+impl Drop for XftDraw {
+    fn drop(&mut self) {
+        unsafe { x11::xft::XftDrawDestroy(self.draw) };
+    }
+}
+
 struct Connection(xcb::Connection);
 
 impl Deref for Connection {
@@ -55,11 +88,11 @@ impl Deref for Connection {
 
 impl Connection {
     fn new() -> Self {
-        let extensions = [xcb::Extension::RandR];
-        let (connection, preferred_screen_index) =
-            xcb::Connection::connect_with_extensions(None, &extensions, &[]).unwrap();
+        let display = unsafe { x11::xlib::XOpenDisplay(null()) };
 
-        assert_eq!(preferred_screen_index, 0);
+        let extensions = [xcb::Extension::RandR];
+        let connection =
+            unsafe { xcb::Connection::from_xlib_display_and_extensions(display, &extensions, &[]) };
 
         Self(connection)
     }
@@ -82,7 +115,6 @@ impl Connection {
     where
         Request: xcb::RequestWithoutReply + std::fmt::Debug,
     {
-        dbg!(&request);
         if let Err(err) = self.send_and_check_request(request) {
             dbg!(&request);
             panic!("{}", err);
@@ -95,7 +127,9 @@ struct Setup {
     root_window: xcb::x::Window,
     width: u16,
     height: u16,
-    visual: u32,
+    visual_id: u32,
+    visual: *mut x11::xlib::Visual,
+    colormap: xcb::x::Colormap,
 }
 
 impl Setup {
@@ -111,32 +145,57 @@ impl Setup {
 
         // The root window, which is essentially a rect.
         let root_window = screen.root();
-        let visual = screen
+        let visual_id = screen
             .allowed_depths()
             .find_map(|depth| (depth.depth() == 32).then(|| depth.visuals()[0].visual_id()))
             .unwrap();
 
+        let display = connection.get_raw_dpy();
+        let mut visual_info_mask = x11::xlib::XVisualInfo {
+            depth: 32,
+            visual: null_mut(),
+            visualid: 0, // TODO: Specify the id we got already?
+            screen: 0,
+            class: 0,
+            red_mask: 0,
+            green_mask: 0,
+            blue_mask: 0,
+            colormap_size: 0,
+            bits_per_rgb: 0,
+        };
+        let mut result = 0;
+        let visual_info = unsafe {
+            x11::xlib::XGetVisualInfo(
+                display,
+                x11::xlib::VisualDepthMask,
+                &mut visual_info_mask as *mut x11::xlib::XVisualInfo,
+                &mut result as *mut i32,
+            )
+        };
+        let visual_info = unsafe { *visual_info };
+        assert_eq!(visual_info.visualid, visual_id as u64);
+        let visual = visual_info.visual;
+
         let width = screen.width_in_pixels();
         let height = screen.height_in_pixels();
+
+        let colormap: xcb::x::Colormap = connection.generate_id();
+        connection.exec_(&xcb::x::CreateColormap {
+            alloc: xcb::x::ColormapAlloc::None,
+            mid: colormap,
+            window: root_window,
+            visual: visual_id,
+        });
 
         Self {
             connection,
             root_window,
             width,
             height,
+            visual_id,
             visual,
+            colormap,
         }
-    }
-
-    fn create_colormap(&self) -> xcb::x::Colormap {
-        let colormap: xcb::x::Colormap = self.connection.generate_id();
-        self.connection.exec_(&xcb::x::CreateColormap {
-            alloc: xcb::x::ColormapAlloc::None,
-            mid: colormap,
-            window: self.root_window,
-            visual: self.visual,
-        });
-        colormap
     }
 
     fn get_screen_resources(&self) -> xcb::randr::GetScreenResourcesCurrentReply {
@@ -185,7 +244,7 @@ impl Setup {
             height,
             border_width: 0,
             class: xcb::x::WindowClass::InputOutput,
-            visual: self.visual,
+            visual: self.visual_id,
             value_list: &[
                 xcb::x::Cw::BackPixel(0x00000000),
                 xcb::x::Cw::BorderPixel(0x00000000),
@@ -218,21 +277,70 @@ impl Setup {
         });
         cid
     }
+
+    fn new_xft_draw(&self, pixmap: &xcb::x::Pixmap) -> XftDraw {
+        let display = self.connection.get_raw_dpy();
+        let visual = self.visual;
+        let colormap = self.colormap.resource_id() as u64;
+
+        let draw = unsafe {
+            x11::xft::XftDrawCreate(display, pixmap.resource_id() as u64, visual, colormap)
+        };
+        if draw == null_mut() {
+            panic!("Failed to create Xft draw.");
+        }
+
+        let mut render_color = x11::xrender::XRenderColor {
+            red: 30000,
+            green: 0,
+            blue: 30000,
+            alpha: 30000,
+        };
+
+        let mut color = x11::xft::XftColor {
+            pixel: 0,
+            color: x11::xrender::XRenderColor {
+                red: 0,
+                green: 0,
+                blue: 0,
+                alpha: 0,
+            },
+        };
+
+        let result = unsafe {
+            x11::xft::XftColorAllocValue(
+                display,
+                visual,
+                colormap,
+                &mut render_color as *mut x11::xrender::XRenderColor,
+                &mut color as *mut x11::xft::XftColor,
+            )
+        };
+        dbg!(&color);
+        if result == 0 {
+            panic!("Failed to create Xft color.");
+        }
+
+        let font = b"UbuntuMono Nerd Font:size=12\0";
+        let font = unsafe { x11::xft::XftFontOpenName(display, 0, font.as_ptr() as *const i8) };
+        if result == 0 {
+            panic!("Failed to create Xft font.");
+        }
+
+        XftDraw { draw, color, font }
+    }
 }
 
 struct Bar {
     setup: Setup,
     monitors: Vec<Monitor>,
-    draw_gc: xcb::x::Gcontext,
-    clear_gc: xcb::x::Gcontext,
-    attr_gc: xcb::x::Gcontext,
+    bg_gc: xcb::x::Gcontext,
+    fg_gc: xcb::x::Gcontext,
 }
 
 impl Bar {
     fn new() -> Self {
         let setup = Setup::new();
-        // TODO What does a colormap do?
-        let colormap = setup.create_colormap();
 
         let bar_height = 20;
 
@@ -264,8 +372,13 @@ impl Bar {
         let monitors = valid_regions
             .into_iter()
             .map(|rect| {
-                let (window, pixmap) = setup
-                    .create_window_and_pixmap(rect.x, rect.y, rect.width, bar_height, colormap);
+                let (window, pixmap) = setup.create_window_and_pixmap(
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    bar_height,
+                    setup.colormap,
+                );
 
                 Monitor {
                     x: rect.x,
@@ -374,37 +487,59 @@ impl Bar {
 
         // This is needed to get the root/depth. The root window has 24bpp, we want 32. Why?
         let reference_drawable = xcb::x::Drawable::Window(monitors[0].window);
-        let draw_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
-        let clear_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(0xFF0000FF)]);
-        let attr_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
+        let bg_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(0x00000000)]);
+        let fg_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
 
         // Make windows visible.
-        for monitor in &monitors {
-            setup.connection.exec_(&xcb::x::MapWindow {
-                window: monitor.window,
-            });
-
-            setup.connection.exec_(&xcb::x::PolyFillRectangle {
-                drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
-                gc: clear_gc,
-                rectangles: &[xcb::x::Rectangle {
-                    x: 0,
-                    y: 0,
-                    width: monitor.width,
-                    height: monitor.height,
-                }],
-            });
-        }
+        monitors
+            .iter()
+            .map(|monitor| {
+                setup.connection.send_request_checked(&xcb::x::MapWindow {
+                    window: monitor.window,
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .for_each(|cookie| setup.connection.check_request(cookie).unwrap());
 
         setup.connection.flush().unwrap();
 
         Self {
             setup,
             monitors,
-            draw_gc,
-            clear_gc,
-            attr_gc,
+            bg_gc,
+            fg_gc,
         }
+    }
+
+    fn clear_monitors(&self) {
+        // Make windows visible.
+        self.monitors
+            .iter()
+            .map(|monitor| {
+                self.setup
+                    .connection
+                    .send_request_checked(&xcb::x::PolyFillRectangle {
+                        drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
+                        gc: self.bg_gc,
+                        rectangles: &[xcb::x::Rectangle {
+                            x: 0,
+                            y: 0,
+                            width: monitor.width,
+                            height: monitor.height,
+                        }],
+                    })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .for_each(|cookie| self.setup.connection.check_request(cookie).unwrap());
+    }
+
+    fn render_string(&self, text: &str) {
+        self.clear_monitors();
+
+        let mut draw = self.setup.new_xft_draw(&self.monitors[0].pixmap);
+        draw.draw_string(text);
     }
 }
 
@@ -430,7 +565,7 @@ fn main() {
                             for monitor in &bar.monitors {
                                 bar.setup.connection.exec_(&xcb::x::PolyFillRectangle {
                                     drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
-                                    gc: bar.clear_gc,
+                                    gc: bar.bg_gc,
                                     rectangles: &[xcb::x::Rectangle {
                                         x: 0,
                                         y: 0,
@@ -439,6 +574,8 @@ fn main() {
                                     }],
                                 });
                             }
+
+                            bar.render_string("lolralskdjlaskjdlaskjdlaskdjalskdjlaskdjlaskjdlaskjdlaskjdlaskjdlaskdjlaskjdlaksjdlaksjdlaksjdlaksjdlaskjdlaskjdlaskjdlaskjdofl");
                             redraw = true;
                         }
                         _ => { dbg!(&event); }
@@ -493,7 +630,7 @@ fn main() {
                 bar.setup.connection.exec_(&xcb::x::CopyArea {
                     src_drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
                     dst_drawable: xcb::x::Drawable::Window(monitor.window),
-                    gc: bar.clear_gc,
+                    gc: bar.bg_gc,
                     src_x: 0,
                     src_y: 0,
                     dst_x: 0,
@@ -505,49 +642,5 @@ fn main() {
         }
 
         bar.setup.connection.flush().unwrap();
-        //     // If connection is in error state, then it has been shut down.
-        //     if xcb_connection_has_error(c) {
-        //         break;
-        //     }
-        //
-        //     let redraw = false;
-        //
-        //     // If new input:
-        //     // parse the input and prepare redraw.
-        //
-        //     // Check X for events.
-        //     // if(pollin[1].revents & POLLIN) { // The event comes from the Xorg server
-        //     //     while((ev = xcb_poll_for_event(c))) {
-        //     //         expose_ev = (xcb_expose_event_t*)ev;
-        //     //
-        //     //         switch(ev->response_type & 0x7F) {
-        //     //         case XCB_EXPOSE:
-        //     //             if(expose_ev->count == 0)
-        //     //                 redraw = true;
-        //     //             break;
-        //     //         case XCB_BUTTON_PRESS:
-        //     //             press_ev = (xcb_button_press_event_t*)ev;
-        //     //             {
-        //     //                 area_t* area = area_get(press_ev->event, press_ev->detail, press_ev->event_x);
-        //     //                 // Respond to the click
-        //     //                 if(area) {
-        //     //                     (void)write(STDOUT_FILENO, area->cmd, strlen(area->cmd));
-        //     //                     (void)write(STDOUT_FILENO, "\n", 1);
-        //     //                 }
-        //     //             }
-        //     //             break;
-        //     //         }
-        //     //
-        //     //         free(ev);
-        //     //     }
-        //     // }
-        //
-        //     // Copy our temporary pixmap onto the window
-        //     if redraw {
-        //         // for(monitor_t* mon = monhead; mon; mon = mon->next) {
-        //         //     xcb_copy_area(c, mon->pixmap, mon->window, gc[GC_DRAW], 0, 0, 0, 0, mon->width, bh);
-        //         // }
-        //     }
-        //
     }
 }
