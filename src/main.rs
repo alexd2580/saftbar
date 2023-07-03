@@ -473,7 +473,7 @@ impl Bar {
                 window: monitor.window,
                 property: xcb::x::ATOM_WM_NAME,
                 r#type: xcb::x::ATOM_STRING,
-                data: "bananabar".as_bytes(),
+                data: "saftladen".as_bytes(),
             });
 
             setup.connection.exec_(&xcb::x::ChangeProperty {
@@ -481,7 +481,7 @@ impl Bar {
                 window: monitor.window,
                 property: xcb::x::ATOM_WM_CLASS,
                 r#type: xcb::x::ATOM_STRING,
-                data: "bananabar".as_bytes(),
+                data: "saftladen".as_bytes(),
             });
         }
 
@@ -547,7 +547,7 @@ fn main() {
     // TODO handle signals.
 
     // TODO Use execution path: arg0.
-    let _instance_name = "bananabar";
+    let _instance_name = "saftladen";
 
     // Connect to the Xserver and initialize scr
     let bar = Bar::new();
