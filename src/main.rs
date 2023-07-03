@@ -1,9 +1,12 @@
-use std::{cmp::Ordering, ops::Deref, time::Duration};
+use std::{cmp::Ordering, ops::Deref};
 
 use xcb::Xid;
 
 struct Monitor {
-    rect: xcb::x::Rectangle,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
     window: xcb::x::Window,
     pixmap: xcb::x::Pixmap,
 }
@@ -79,6 +82,7 @@ impl Connection {
     where
         Request: xcb::RequestWithoutReply + std::fmt::Debug,
     {
+        dbg!(&request);
         if let Err(err) = self.send_and_check_request(request) {
             dbg!(&request);
             panic!("{}", err);
@@ -263,10 +267,11 @@ impl Bar {
                 let (window, pixmap) = setup
                     .create_window_and_pixmap(rect.x, rect.y, rect.width, bar_height, colormap);
 
-                let mut mon_rect = rect.clone();
-                mon_rect.height = bar_height;
                 Monitor {
-                    rect: mon_rect,
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: bar_height,
                     window,
                     pixmap,
                 }
@@ -322,16 +327,16 @@ impl Bar {
             let strut = [
                 0,
                 0,
-                monitor.rect.height,
+                monitor.height,
                 0,
                 0,
                 0,
                 0,
                 0,
-                monitor.rect.x as u16,
-                monitor.rect.x as u16 + monitor.rect.width,
-                10,
-                11,
+                monitor.x as u16,
+                monitor.x as u16 + monitor.width,
+                0,
+                0,
             ];
 
             setup.connection.exec_(&xcb::x::ChangeProperty {
@@ -370,23 +375,24 @@ impl Bar {
         // This is needed to get the root/depth. The root window has 24bpp, we want 32. Why?
         let reference_drawable = xcb::x::Drawable::Window(monitors[0].window);
         let draw_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
-        let clear_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
+        let clear_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(0xFF0000FF)]);
         let attr_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
 
         // Make windows visible.
         for monitor in &monitors {
+            setup.connection.exec_(&xcb::x::MapWindow {
+                window: monitor.window,
+            });
+
             setup.connection.exec_(&xcb::x::PolyFillRectangle {
                 drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
                 gc: clear_gc,
                 rectangles: &[xcb::x::Rectangle {
                     x: 0,
                     y: 0,
-                    ..monitor.rect
+                    width: monitor.width,
+                    height: monitor.height,
                 }],
-            });
-
-            setup.connection.exec_(&xcb::x::MapWindow {
-                window: monitor.window,
             });
         }
 
@@ -409,70 +415,139 @@ fn main() {
     let _instance_name = "bananabar";
 
     // Connect to the Xserver and initialize scr
-    let _bar = Bar::new();
+    let bar = Bar::new();
 
     // TODO Handle ARGS
     // TODO clickable areas.
 
-    // // Do the heavy lifting
-    // init(wm_name, instance_name);
-    // // The string is strdup'd when the command line arguments are parsed
-    // free(wm_name);
-    // // The string is strdup'd when stripping argv[0]
-    // free(instance_name);
-    // // Get the fd to Xserver
-    // pollin[1].fd = xcb_get_file_descriptor(c);
-    //
-    // // Prevent fgets to block
-    // fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
-    //
-    // loop {
-    //     // If connection is in error state, then it has been shut down.
-    //     if xcb_connection_has_error(c) {
-    //         break;
-    //     }
-    //
-    //     let redraw = false;
-    //
-    //     // If new input:
-    //     // parse the input and prepare redraw.
-    //
-    //     // Check X for events.
-    //     // if(pollin[1].revents & POLLIN) { // The event comes from the Xorg server
-    //     //     while((ev = xcb_poll_for_event(c))) {
-    //     //         expose_ev = (xcb_expose_event_t*)ev;
-    //     //
-    //     //         switch(ev->response_type & 0x7F) {
-    //     //         case XCB_EXPOSE:
-    //     //             if(expose_ev->count == 0)
-    //     //                 redraw = true;
-    //     //             break;
-    //     //         case XCB_BUTTON_PRESS:
-    //     //             press_ev = (xcb_button_press_event_t*)ev;
-    //     //             {
-    //     //                 area_t* area = area_get(press_ev->event, press_ev->detail, press_ev->event_x);
-    //     //                 // Respond to the click
-    //     //                 if(area) {
-    //     //                     (void)write(STDOUT_FILENO, area->cmd, strlen(area->cmd));
-    //     //                     (void)write(STDOUT_FILENO, "\n", 1);
-    //     //                 }
-    //     //             }
-    //     //             break;
-    //     //         }
-    //     //
-    //     //         free(ev);
-    //     //     }
-    //     // }
-    //
-    //     // Copy our temporary pixmap onto the window
-    //     if redraw {
-    //         // for(monitor_t* mon = monhead; mon; mon = mon->next) {
-    //         //     xcb_copy_area(c, mon->pixmap, mon->window, gc[GC_DRAW], 0, 0, 0, 0, mon->width, bh);
-    //         // }
-    //     }
-    //
-    //     xcb_flush(c);
-    // }
+    loop {
+        let mut redraw = false;
+        match bar.setup.connection.wait_for_event() {
+            Ok(event) => match event {
+                xcb::Event::X(event) => {
+                    match event {
+                        xcb::x::Event::ButtonPress(_) => {
+                            for monitor in &bar.monitors {
+                                bar.setup.connection.exec_(&xcb::x::PolyFillRectangle {
+                                    drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
+                                    gc: bar.clear_gc,
+                                    rectangles: &[xcb::x::Rectangle {
+                                        x: 0,
+                                        y: 0,
+                                        width: monitor.width,
+                                        height: monitor.height,
+                                    }],
+                                });
+                            }
+                            redraw = true;
+                        }
+                        _ => { dbg!(&event); }
+                        // xcb::x::Event::KeyRelease(_) => todo!(),
+                        // xcb::x::Event::ButtonPress(_) => todo!(),
+                        // xcb::x::Event::ButtonRelease(_) => todo!(),
+                        // xcb::x::Event::MotionNotify(_) => todo!(),
+                        // xcb::x::Event::EnterNotify(_) => todo!(),
+                        // xcb::x::Event::LeaveNotify(_) => todo!(),
+                        // xcb::x::Event::FocusIn(_) => todo!(),
+                        // xcb::x::Event::FocusOut(_) => todo!(),
+                        // xcb::x::Event::KeymapNotify(_) => todo!(),
+                        // xcb::x::Event::Expose(_) => todo!(),
+                        // xcb::x::Event::GraphicsExposure(_) => todo!(),
+                        // xcb::x::Event::NoExposure(_) => todo!(),
+                        // xcb::x::Event::VisibilityNotify(_) => todo!(),
+                        // xcb::x::Event::CreateNotify(_) => todo!(),
+                        // xcb::x::Event::DestroyNotify(_) => todo!(),
+                        // xcb::x::Event::UnmapNotify(_) => todo!(),
+                        // xcb::x::Event::MapNotify(_) => todo!(),
+                        // xcb::x::Event::MapRequest(_) => todo!(),
+                        // xcb::x::Event::ReparentNotify(_) => todo!(),
+                        // xcb::x::Event::ConfigureNotify(_) => todo!(),
+                        // xcb::x::Event::ConfigureRequest(_) => todo!(),
+                        // xcb::x::Event::GravityNotify(_) => todo!(),
+                        // xcb::x::Event::ResizeRequest(_) => todo!(),
+                        // xcb::x::Event::CirculateNotify(_) => todo!(),
+                        // xcb::x::Event::CirculateRequest(_) => todo!(),
+                        // xcb::x::Event::PropertyNotify(_) => todo!(),
+                        // xcb::x::Event::SelectionClear(_) => todo!(),
+                        // xcb::x::Event::SelectionRequest(_) => todo!(),
+                        // xcb::x::Event::SelectionNotify(_) => todo!(),
+                        // xcb::x::Event::ColormapNotify(_) => todo!(),
+                        // xcb::x::Event::ClientMessage(_) => todo!(),
+                        // xcb::x::Event::MappingNotify(_) => todo!(),
+                    }
+                }
+                xcb::Event::RandR(event) => {
+                    dbg!(&event);
+                }
+                xcb::Event::Unknown(event) => {
+                    dbg!(&event);
+                }
+            },
+            Err(err) => {
+                panic!("{:?}", err);
+            }
+        }
 
-    std::thread::sleep(Duration::from_secs(5));
+        if redraw {
+            for monitor in &bar.monitors {
+                bar.setup.connection.exec_(&xcb::x::CopyArea {
+                    src_drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
+                    dst_drawable: xcb::x::Drawable::Window(monitor.window),
+                    gc: bar.clear_gc,
+                    src_x: 0,
+                    src_y: 0,
+                    dst_x: 0,
+                    dst_y: 0,
+                    width: monitor.width,
+                    height: monitor.height,
+                });
+            }
+        }
+
+        bar.setup.connection.flush().unwrap();
+        //     // If connection is in error state, then it has been shut down.
+        //     if xcb_connection_has_error(c) {
+        //         break;
+        //     }
+        //
+        //     let redraw = false;
+        //
+        //     // If new input:
+        //     // parse the input and prepare redraw.
+        //
+        //     // Check X for events.
+        //     // if(pollin[1].revents & POLLIN) { // The event comes from the Xorg server
+        //     //     while((ev = xcb_poll_for_event(c))) {
+        //     //         expose_ev = (xcb_expose_event_t*)ev;
+        //     //
+        //     //         switch(ev->response_type & 0x7F) {
+        //     //         case XCB_EXPOSE:
+        //     //             if(expose_ev->count == 0)
+        //     //                 redraw = true;
+        //     //             break;
+        //     //         case XCB_BUTTON_PRESS:
+        //     //             press_ev = (xcb_button_press_event_t*)ev;
+        //     //             {
+        //     //                 area_t* area = area_get(press_ev->event, press_ev->detail, press_ev->event_x);
+        //     //                 // Respond to the click
+        //     //                 if(area) {
+        //     //                     (void)write(STDOUT_FILENO, area->cmd, strlen(area->cmd));
+        //     //                     (void)write(STDOUT_FILENO, "\n", 1);
+        //     //                 }
+        //     //             }
+        //     //             break;
+        //     //         }
+        //     //
+        //     //         free(ev);
+        //     //     }
+        //     // }
+        //
+        //     // Copy our temporary pixmap onto the window
+        //     if redraw {
+        //         // for(monitor_t* mon = monhead; mon; mon = mon->next) {
+        //         //     xcb_copy_area(c, mon->pixmap, mon->window, gc[GC_DRAW], 0, 0, 0, 0, mon->width, bh);
+        //         // }
+        //     }
+        //
+    }
 }
