@@ -62,4 +62,5 @@ dependencies = [
  "bitflags",
  "libc",
  "quick-xml",
+ "x11",
 ]
