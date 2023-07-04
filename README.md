@@ -36,3 +36,9 @@ specifications.
 
 If you find this code to be lacking in any regard, please feel free to open
 issues, i'd love to learn more about Rust, X and bar-api design.
+
+# Challenges
+
+Fonts....
+
+[](./images/debug-fonts.png)

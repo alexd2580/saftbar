@@ -6,31 +6,29 @@ mod xft;
 use analyse::{analyse_string, ColoredText, InputAnalysis, SingleDisplay};
 use setup::{compare_rectangles, Rectangle, Setup};
 use xcb::Xid;
-use xft::Xft;
+use xft::{Font, Xft};
 
 struct Monitor {
-    x: i16,
-    y: i16,
-    width: u16,
-    height: u16,
+    x: u32,
+    y: u32,
+    w: u32,
     window: xcb::x::Window,
     pixmap: xcb::x::Pixmap,
 }
 
 struct Bar {
+    height: u32,
     setup: Setup,
     xft: Xft,
-    font: *mut x11::xft::XftFont,
+    font: Font,
     monitors: Vec<Monitor>,
-    bg_gc: xcb::x::Gcontext,
-    fg_gc: xcb::x::Gcontext,
+    clear_gc: xcb::x::Gcontext,
+    color_gc: xcb::x::Gcontext,
 }
 
 impl Bar {
     fn new() -> Self {
         let setup = Setup::new();
-
-        let bar_height = 20;
 
         let screen_resources = setup.get_screen_resources();
         let outputs = screen_resources.outputs();
@@ -39,7 +37,7 @@ impl Bar {
         let mut regions = Vec::new();
         for output in outputs {
             if let Some(crtc_info) = setup.get_crtc_info(*output) {
-                regions.push(xcb::x::Rectangle::from_crtc(&crtc_info));
+                regions.push(Rectangle::from(&crtc_info));
             }
         }
 
@@ -52,27 +50,22 @@ impl Bar {
                     .iter()
                     .enumerate()
                     .all(|(index_other, other)| index == index_other || !rect.is_inside(other))
-                    .then_some(*rect)
+                    .then_some(rect.clone())
             })
             .collect::<Vec<_>>();
         valid_regions.sort_by(compare_rectangles);
 
+        let height = 16;
         let monitors = valid_regions
             .into_iter()
-            .map(|rect| {
-                let (window, pixmap) = setup.create_window_and_pixmap(
-                    rect.x,
-                    rect.y,
-                    rect.width,
-                    bar_height,
-                    setup.colormap,
-                );
+            .map(|Rectangle { x, y, w, .. }| {
+                let (window, pixmap) =
+                    setup.create_window_and_pixmap(x, y, w, height, setup.colormap);
 
                 Monitor {
-                    x: rect.x,
-                    y: rect.y,
-                    width: rect.width,
-                    height: bar_height,
+                    x,
+                    y,
+                    w,
                     window,
                     pixmap,
                 }
@@ -128,14 +121,14 @@ impl Bar {
             let strut = [
                 0,
                 0,
-                monitor.height,
+                height,
                 0,
                 0,
                 0,
                 0,
                 0,
-                monitor.x as u16,
-                monitor.x as u16 + monitor.width,
+                monitor.x,
+                monitor.x + monitor.w,
                 0,
                 0,
             ];
@@ -175,8 +168,8 @@ impl Bar {
 
         // This is needed to get the root/depth. The root window has 24bpp, we want 32. Why?
         let reference_drawable = xcb::x::Drawable::Window(monitors[0].window);
-        let bg_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(0x00000000)]);
-        let fg_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
+        let clear_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(0x00000000)]);
+        let color_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
 
         // Make windows visible.
         monitors
@@ -193,16 +186,18 @@ impl Bar {
         setup.flush().unwrap();
 
         let mut xft = setup.create_xft();
-        let font = b"UbuntuMono Nerd Font:size=12\0";
-        let font = xft.font(font);
+        let font = b"UbuntuMono Nerd Font:size=12:antialias=true:hinting=false\0";
+
+        let font = xft.create_font(font);
 
         Self {
+            height,
             setup,
             xft,
             font,
             monitors,
-            bg_gc,
-            fg_gc,
+            clear_gc,
+            color_gc,
         }
     }
 
@@ -213,12 +208,12 @@ impl Bar {
             .map(|monitor| {
                 self.setup.send_request_checked(&xcb::x::PolyFillRectangle {
                     drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
-                    gc: self.bg_gc,
+                    gc: self.clear_gc,
                     rectangles: &[xcb::x::Rectangle {
                         x: 0,
                         y: 0,
-                        width: monitor.width,
-                        height: monitor.height,
+                        width: monitor.w.try_into().unwrap(),
+                        height: self.height.try_into().unwrap(),
                     }],
                 })
             })
@@ -228,7 +223,6 @@ impl Bar {
     }
 
     fn render_string(&mut self, _text: &str) {
-        self.clear_monitors();
         let InputAnalysis(per_monitor) = analyse_string();
         for (index, monitor) in self.monitors.iter().enumerate() {
             let draw = self.xft.new_draw(monitor.pixmap.resource_id() as u64);
@@ -236,13 +230,63 @@ impl Bar {
                 continue;
             };
 
+            // Left aligned.
+            let mut cursor_offset = 0;
             for ColoredText { text, fg, bg } in left {
-                let fg = self.xft.color(*fg);
-                self.xft.draw_string(&text, draw.draw, fg, self.font);
+                let width = self.xft.string_cursor_offset(&text, &self.font);
+
+                let r = u32::from(bg.0) >> 8;
+                let g = u32::from(bg.1) >> 8;
+                let b = u32::from(bg.2) >> 8;
+                let a = u32::from(bg.3) >> 8;
+                let color = r << 24 | g << 16 | b << 8 | a;
+                self.setup.exec_(&xcb::x::ChangeGc {
+                    gc: self.color_gc,
+                    value_list: &[xcb::x::Gc::Foreground(color)],
+                });
+
+                self.setup.exec_(&xcb::x::PolyFillRectangle {
+                    drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
+                    gc: self.color_gc,
+                    rectangles: &[xcb::x::Rectangle {
+                        x: cursor_offset.try_into().unwrap(),
+                        y: 0,
+                        width: width.try_into().unwrap(),
+                        height: self.height.try_into().unwrap(),
+                    }],
+                });
+
+                let fg = self.xft.create_color(*fg);
+                self.xft.draw_string(
+                    &text,
+                    &draw,
+                    &fg,
+                    &self.font,
+                    self.height as u32,
+                    cursor_offset,
+                );
+                cursor_offset += width;
             }
-            for ColoredText { text, fg, bg } in right {
-                let fg = self.xft.color(*fg);
-                self.xft.draw_string(&text, draw.draw, fg, self.font);
+
+            // Right aligned.
+            let mut text_width = 0;
+            let cursor_offsets = right
+                .iter()
+                .map(|text| {
+                    let cursor_offset = self.xft.string_cursor_offset(&text.text, &self.font);
+                    text_width += cursor_offset;
+                    cursor_offset
+                })
+                .collect::<Vec<_>>();
+
+            let mut cursor_offset = monitor.w - text_width;
+            for (ColoredText { text, fg, .. }, offset) in
+                right.iter().zip(cursor_offsets.into_iter())
+            {
+                let fg = self.xft.create_color(*fg);
+                self.xft
+                    .draw_string(text, &draw, &fg, &self.font, self.height, cursor_offset);
+                cursor_offset += offset;
             }
         }
 
@@ -270,19 +314,7 @@ fn main() {
                 xcb::Event::X(event) => {
                     match event {
                         xcb::x::Event::ButtonPress(_) => {
-                            for monitor in &bar.monitors {
-                                bar.setup.exec_(&xcb::x::PolyFillRectangle {
-                                    drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
-                                    gc: bar.bg_gc,
-                                    rectangles: &[xcb::x::Rectangle {
-                                        x: 0,
-                                        y: 0,
-                                        width: monitor.width,
-                                        height: monitor.height,
-                                    }],
-                                });
-                            }
-
+                            bar.clear_monitors();
                             bar.render_string("lol");
                             redraw = true;
                         }
@@ -338,13 +370,13 @@ fn main() {
                 bar.setup.exec_(&xcb::x::CopyArea {
                     src_drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
                     dst_drawable: xcb::x::Drawable::Window(monitor.window),
-                    gc: bar.bg_gc,
+                    gc: bar.clear_gc,
                     src_x: 0,
                     src_y: 0,
                     dst_x: 0,
                     dst_y: 0,
-                    width: monitor.width,
-                    height: monitor.height,
+                    width: monitor.w.try_into().unwrap(),
+                    height: bar.height.try_into().unwrap(),
                 });
             }
         }

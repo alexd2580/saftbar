@@ -1,46 +1,52 @@
-use std::{cmp::Ordering, ptr::null_mut, ops::Deref};
+use std::{cmp::Ordering, ops::Deref, ptr::null_mut};
 
 use crate::{connection::Connection, xft::Xft};
 
 use xcb::Xid;
 
-pub trait Rectangle {
-    fn from_crtc(crtc: &xcb::randr::GetCrtcInfoReply) -> Self;
-    fn is_inside(&self, rect: &Self) -> bool;
+#[derive(Clone)]
+pub struct Rectangle {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
 }
 
-impl Rectangle for xcb::x::Rectangle {
-    fn from_crtc(crtc: &xcb::randr::GetCrtcInfoReply) -> Self {
+impl From<&xcb::randr::GetCrtcInfoReply> for Rectangle {
+    fn from(value: &xcb::randr::GetCrtcInfoReply) -> Self {
         Self {
-            x: crtc.x(),
-            y: crtc.y(),
-            width: crtc.width(),
-            height: crtc.height(),
+            x: value.x().try_into().unwrap(),
+            y: value.y().try_into().unwrap(),
+            w: value.width().try_into().unwrap(),
+            h: value.height().try_into().unwrap(),
         }
     }
+}
 
-    fn is_inside(&self, rect: &xcb::x::Rectangle) -> bool {
-        let x = self.x >= rect.x && self.x + self.width as i16 <= rect.x + rect.width as i16;
-        let y = self.y >= rect.y && self.y + self.height as i16 <= rect.y + rect.height as i16;
-        x && y
+impl Rectangle {
+    pub fn is_inside(&self, rect: &Rectangle) -> bool {
+        self.x >= rect.x
+            && self.x + self.w <= rect.x + rect.w
+            && self.y >= rect.y
+            && self.y + self.h <= rect.y + rect.h
     }
 }
 
 // Order rects from left to right, then from top to bottom.
 // Edge cases for overlapping screens.
-pub fn compare_rectangles(a: &xcb::x::Rectangle, b: &xcb::x::Rectangle) -> Ordering {
+pub fn compare_rectangles(a: &Rectangle, b: &Rectangle) -> Ordering {
     if a.x != b.x {
         a.x.cmp(&b.x)
     } else {
-        (a.y + a.height as i16).cmp(&b.y)
+        (a.y + a.h).cmp(&b.y)
     }
 }
 
 pub struct Setup {
     connection: Connection,
     root_window: xcb::x::Window,
-    width: u16,
-    height: u16,
+    width: u32,
+    height: u32,
     visual_id: u32,
     visual: *mut x11::xlib::Visual,
     pub colormap: xcb::x::Colormap,
@@ -98,8 +104,8 @@ impl Setup {
         assert_eq!(visual_info.visualid, visual_id as u64);
         let visual = visual_info.visual;
 
-        let width = screen.width_in_pixels();
-        let height = screen.height_in_pixels();
+        let width = screen.width_in_pixels().try_into().unwrap();
+        let height = screen.height_in_pixels().try_into().unwrap();
 
         let colormap: xcb::x::Colormap = connection.generate_id();
         connection.exec_(&xcb::x::CreateColormap {
@@ -151,20 +157,24 @@ impl Setup {
 
     pub fn create_window_and_pixmap(
         &self,
-        x: i16,
-        y: i16,
-        width: u16,
-        height: u16,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
         colormap: xcb::x::Colormap,
     ) -> (xcb::x::Window, xcb::x::Pixmap) {
         let window = self.connection.generate_id();
         let depth = 32; // TODO (visual == scr->root_visual) ? XCB_COPY_FROM_PARENT : 32;
+
+        let width = width.try_into().unwrap();
+        let height = height.try_into().unwrap();
+
         self.connection.exec_(&xcb::x::CreateWindow {
             depth,
             wid: window,
             parent: self.root_window,
-            x,
-            y,
+            x: x.try_into().unwrap(),
+            y: y.try_into().unwrap(),
             width,
             height,
             border_width: 0,

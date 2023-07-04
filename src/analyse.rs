@@ -22,9 +22,19 @@ pub fn analyse_string() -> InputAnalysis {
         Some(SingleDisplay {
             left: vec![
                 ColoredText {
-                    text: "leftfirst1".to_owned(),
+                    text: "".to_owned(),
+                    fg: white,
+                    bg: red,
+                },
+                ColoredText {
+                    text: "tem slk gub gb sck ybe ja pal gl on le         ".to_owned(),
                     fg: red,
                     bg: white,
+                },
+                ColoredText {
+                    text: "".to_owned(),
+                    fg: white,
+                    bg: red,
                 },
                 ColoredText {
                     text: "leftlast1".to_owned(),
@@ -48,7 +58,7 @@ pub fn analyse_string() -> InputAnalysis {
         Some(SingleDisplay {
             left: vec![
                 ColoredText {
-                    text: "leftfirst2".to_owned(),
+                    text: "telegramslackgithubgitlabstackyoutubejirapaypalgmailamazongoogle".to_owned(),
                     fg: blue,
                     bg: green,
                 },
