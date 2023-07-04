@@ -41,4 +41,5 @@ issues, i'd love to learn more about Rust, X and bar-api design.
 
 Fonts....
 
-[](./images/debug-fonts.png)
+![fonts are hard, especially proper powerline
+fonts](./images/debug-fonts.png)
