@@ -57,13 +57,15 @@ pub enum PropertyData<'a> {
 }
 
 pub struct Setup {
-    connection: Connection,
-    root_window: x::Window,
     width: u32,
     height: u32,
-    visual_id: u32,
-    visual: *mut x11::xlib::Visual,
+
+    // Note the reverse drop order! Children first.
     pub colormap: x::Colormap,
+    visual: *mut x11::xlib::Visual,
+    visual_id: u32,
+    root_window: x::Window,
+    connection: Connection,
 }
 
 impl Setup {

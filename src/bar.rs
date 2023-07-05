@@ -9,8 +9,10 @@ struct Monitor {
     x: u32,
     y: u32,
     w: u32,
-    window: xcb::x::Window,
+
+    // Note the reverse drop order! Children first.
     pixmap: x::Pixmap,
+    window: xcb::x::Window,
 }
 
 pub enum Alignment {
@@ -26,12 +28,14 @@ pub struct ColoredText {
 
 pub struct Bar {
     height: u32,
-    setup: Setup,
-    xft: Xft,
-    font: Font,
-    monitors: Vec<Monitor>,
-    clear_gc: x::Gcontext,
+
+    // Note the reverse drop order! Children first.
     color_gcs: HashMap<RGBA, x::Gcontext>,
+    clear_gc: x::Gcontext,
+    font: Font,
+    xft: Xft,
+    monitors: Vec<Monitor>,
+    setup: Setup,
 }
 
 impl Bar {
@@ -165,10 +169,10 @@ impl Bar {
 
     fn cache_color(&mut self, reference_drawable: x::Drawable, rgba: &RGBA) {
         if self.color_gcs.get(rgba).is_none() {
-            let r = u32::from(rgba.0) >> 8;
-            let g = u32::from(rgba.1) >> 8;
-            let b = u32::from(rgba.2) >> 8;
-            let a = u32::from(rgba.3) >> 8;
+            let r = u32::from(rgba.0);
+            let g = u32::from(rgba.1);
+            let b = u32::from(rgba.2);
+            let a = u32::from(rgba.3);
             let color = b | g << 8 | r << 16 | a << 24;
 
             let gc = self

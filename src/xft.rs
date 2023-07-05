@@ -2,7 +2,7 @@ use std::{ops::DerefMut, ptr::null_mut};
 
 use x11::{xft, xlib, xrender};
 
-pub type RGBA = (u16, u16, u16, u16);
+pub type RGBA = (u8, u8, u8, u8);
 
 /// Smart object for serverside allocated `XftColor`s.
 pub struct Color {
@@ -64,10 +64,10 @@ impl Xft {
     /// Create a color object, wrap it into a smart object and store.
     pub fn create_color(&self, rgba: RGBA) -> Color {
         let mut render_color = xrender::XRenderColor {
-            red: rgba.0,
-            green: rgba.1,
-            blue: rgba.2,
-            alpha: rgba.3,
+            red: u16::from(rgba.0) << 8,
+            green: u16::from(rgba.1) << 8,
+            blue: u16::from(rgba.2) << 8,
+            alpha: u16::from(rgba.3) << 8,
         };
 
         let mut color = xft::XftColor {

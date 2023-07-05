@@ -1,11 +1,11 @@
 use saftbar::bar::{Alignment, Bar, ColoredText};
 
 fn render(bar: &mut Bar) {
-    let red = (65535, 0, 0, 65535);
-    let blue = (0, 0, 65535, 65535);
-    let black = (0, 0, 0, 65535);
-    let white = (65535, 65535, 65535, 65535);
-    let green = (0, 65535, 0, 65535);
+    let red = (255, 0, 0, 255);
+    let blue = (0, 0, 255, 255);
+    let black = (0, 0, 0, 255);
+    let white = (255, 255, 255, 255);
+    let green = (0, 255, 0, 255);
 
     bar.clear_monitors();
     bar.render_string(
