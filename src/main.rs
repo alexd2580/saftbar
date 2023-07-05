@@ -1,33 +1,44 @@
-mod analyse;
 mod connection;
 mod setup;
 mod xft;
 
-use analyse::{analyse_string, ColoredText, InputAnalysis, SingleDisplay};
+use std::collections::HashMap;
+
 use setup::{compare_rectangles, Rectangle, Setup};
-use xcb::Xid;
-use xft::{Font, Xft};
+use xcb::{x, Xid};
+use xft::{Font, Xft, RGBA};
 
 struct Monitor {
     x: u32,
     y: u32,
     w: u32,
     window: xcb::x::Window,
-    pixmap: xcb::x::Pixmap,
+    pixmap: x::Pixmap,
 }
 
-struct Bar {
+pub enum Alignment {
+    Left,
+    Right,
+}
+
+pub struct ColoredText {
+    pub text: String,
+    pub fg: RGBA,
+    pub bg: RGBA,
+}
+
+pub struct Bar {
     height: u32,
     setup: Setup,
     xft: Xft,
     font: Font,
     monitors: Vec<Monitor>,
-    clear_gc: xcb::x::Gcontext,
-    color_gc: xcb::x::Gcontext,
+    clear_gc: x::Gcontext,
+    color_gcs: HashMap<RGBA, x::Gcontext>,
 }
 
 impl Bar {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let setup = Setup::new();
 
         let screen_resources = setup.get_screen_resources();
@@ -55,7 +66,7 @@ impl Bar {
             .collect::<Vec<_>>();
         valid_regions.sort_by(compare_rectangles);
 
-        let height = 16;
+        let height = 20;
         let monitors = valid_regions
             .into_iter()
             .map(|Rectangle { x, y, w, .. }| {
@@ -72,123 +83,73 @@ impl Bar {
             })
             .collect::<Vec<_>>();
 
-        // Create atoms.
-        let atom_names = [
-            "_NET_WM_DESKTOP",
-            "_NET_WM_WINDOW_TYPE",
-            "_NET_WM_WINDOW_TYPE_DOCK",
-            "_NET_WM_STATE",
-            "_NET_WM_STATE_STICKY",
-            "_NET_WM_STRUT_PARTIAL",
-            "_NET_WM_STRUT",
-        ];
-        let atom_cookies = atom_names.map(|name| {
-            let request = xcb::x::InternAtom {
-                only_if_exists: true,
-                name: name.as_bytes(),
-            };
-            setup.send_request(&request)
-        });
-        let [atom_desktop, atom_window_type, atom_window_type_dock, atom_state, atom_state_sticky, atom_strut, atom_strut_partial] =
-            atom_cookies.map(|cookie| setup.wait_for_reply(cookie).unwrap().atom());
+        // Set EWMH or something values.
+        {
+            // Create atoms.
+            let [desktop, window_type, window_type_dock, state, state_sticky, strut, strut_partial] =
+                setup.get_atoms(&[
+                    "_NET_WM_DESKTOP",
+                    "_NET_WM_WINDOW_TYPE",
+                    "_NET_WM_WINDOW_TYPE_DOCK",
+                    "_NET_WM_STATE",
+                    "_NET_WM_STATE_STICKY",
+                    "_NET_WM_STRUT_PARTIAL",
+                    "_NET_WM_STRUT",
+                ]);
 
-        // Set window properties.
-        for monitor in &monitors {
-            setup.exec_(&xcb::x::ChangeProperty {
-                mode: xcb::x::PropMode::Replace,
-                window: monitor.window,
-                property: atom_desktop,
-                r#type: xcb::x::ATOM_CARDINAL,
-                data: &[u32::MAX],
-            });
+            use setup::PropertyData::{Atom, Cardinal, String};
 
-            setup.exec_(&xcb::x::ChangeProperty {
-                mode: xcb::x::PropMode::Replace,
-                window: monitor.window,
-                property: atom_window_type,
-                r#type: xcb::x::ATOM_ATOM,
-                data: &[atom_window_type_dock],
-            });
-
-            setup.exec_(&xcb::x::ChangeProperty {
-                mode: xcb::x::PropMode::Replace,
-                window: monitor.window,
-                property: atom_state,
-                r#type: xcb::x::ATOM_ATOM,
-                data: &[atom_state_sticky],
-            });
-
-            let strut = [
-                0,
-                0,
-                height,
-                0,
-                0,
-                0,
-                0,
-                0,
-                monitor.x,
-                monitor.x + monitor.w,
-                0,
-                0,
+            let window_type_dock = [window_type_dock];
+            let state_sticky = [state_sticky];
+            let name_bytes = "saftladen".as_bytes();
+            let properties = [
+                (desktop, Cardinal(&[u32::MAX])),
+                (window_type, Atom(&window_type_dock)),
+                (state, Atom(&state_sticky)),
+                (x::ATOM_WM_NAME, String(name_bytes)),
+                (x::ATOM_WM_CLASS, String(name_bytes)),
             ];
 
-            setup.exec_(&xcb::x::ChangeProperty {
-                mode: xcb::x::PropMode::Replace,
-                window: monitor.window,
-                property: atom_strut,
-                r#type: xcb::x::ATOM_CARDINAL,
-                data: &strut,
-            });
+            // Set window properties.
+            for monitor in &monitors {
+                setup.replace_properties(monitor.window, &properties);
 
-            setup.exec_(&xcb::x::ChangeProperty {
-                mode: xcb::x::PropMode::Replace,
-                window: monitor.window,
-                property: atom_strut_partial,
-                r#type: xcb::x::ATOM_CARDINAL,
-                data: &strut[..4],
-            });
-
-            setup.exec_(&xcb::x::ChangeProperty {
-                mode: xcb::x::PropMode::Replace,
-                window: monitor.window,
-                property: xcb::x::ATOM_WM_NAME,
-                r#type: xcb::x::ATOM_STRING,
-                data: "saftladen".as_bytes(),
-            });
-
-            setup.exec_(&xcb::x::ChangeProperty {
-                mode: xcb::x::PropMode::Replace,
-                window: monitor.window,
-                property: xcb::x::ATOM_WM_CLASS,
-                r#type: xcb::x::ATOM_STRING,
-                data: "saftladen".as_bytes(),
-            });
+                let h = height;
+                let sx = monitor.x;
+                let ex = sx + monitor.w;
+                let strut_data = [0, 0, h, 0, 0, 0, 0, 0, sx, ex, 0, 0];
+                let monitor_properties = [
+                    (strut, Cardinal(&strut_data[..4])),
+                    (strut_partial, Cardinal(&strut_data)),
+                ];
+                setup.replace_properties(monitor.window, &monitor_properties);
+            }
         }
 
         // This is needed to get the root/depth. The root window has 24bpp, we want 32. Why?
-        let reference_drawable = xcb::x::Drawable::Window(monitors[0].window);
-        let clear_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(0x00000000)]);
-        let color_gc = setup.create_gc(reference_drawable, &[xcb::x::Gc::Foreground(u32::MAX)]);
+        let reference_drawable = x::Drawable::Window(monitors[0].window);
+        let clear_gc = setup.create_gc(reference_drawable, &[x::Gc::Foreground(0x00000000)]);
 
         // Make windows visible.
-        monitors
-            .iter()
-            .map(|monitor| {
-                setup.send_request_checked(&xcb::x::MapWindow {
-                    window: monitor.window,
-                })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .for_each(|cookie| setup.check_request(cookie).unwrap());
+        setup.map_windows(
+            &monitors
+                .iter()
+                .map(|monitor| monitor.window)
+                .collect::<Vec<_>>(),
+        );
 
-        setup.flush().unwrap();
+        setup.flush();
 
+        // Initialize font.
         let mut xft = setup.create_xft();
-        let font = b"UbuntuMono Nerd Font:size=12:antialias=true:hinting=false\0";
 
-        let font = xft.create_font(font);
+        // let font_family = "UbuntuMono Nerd Font";
+        let font_family = "FiraCode Nerd Font Propo";
+        let font = {
+            let font_params = ":pixelsize=16:antialias=true:hinting=true";
+            let font_pattern = format!("{font_family}{font_params}\0");
+            xft.create_font(&font_pattern)
+        };
 
         Self {
             height,
@@ -197,190 +158,284 @@ impl Bar {
             font,
             monitors,
             clear_gc,
-            color_gc,
+            color_gcs: HashMap::new(),
         }
+    }
+
+    fn cache_color(&mut self, reference_drawable: x::Drawable, rgba: &RGBA) {
+        if self.color_gcs.get(rgba).is_none() {
+            let r = u32::from(rgba.0) >> 8;
+            let g = u32::from(rgba.1) >> 8;
+            let b = u32::from(rgba.2) >> 8;
+            let a = u32::from(rgba.3) >> 8;
+            let color = b | g << 8 | r << 16 | a << 24;
+
+            let gc = self
+                .setup
+                .create_gc(reference_drawable, &[x::Gc::Foreground(color)]);
+
+            self.color_gcs.insert(*rgba, gc);
+        }
+    }
+
+    fn get_color(&self, rgba: &RGBA) -> x::Gcontext {
+        *self.color_gcs.get(rgba).unwrap()
     }
 
     fn clear_monitors(&self) {
-        // Make windows visible.
-        self.monitors
-            .iter()
-            .map(|monitor| {
-                self.setup.send_request_checked(&xcb::x::PolyFillRectangle {
-                    drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
-                    gc: self.clear_gc,
-                    rectangles: &[xcb::x::Rectangle {
-                        x: 0,
-                        y: 0,
-                        width: monitor.w.try_into().unwrap(),
-                        height: self.height.try_into().unwrap(),
-                    }],
-                })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .for_each(|cookie| self.setup.check_request(cookie).unwrap());
-    }
-
-    fn render_string(&mut self, _text: &str) {
-        let InputAnalysis(per_monitor) = analyse_string();
-        for (index, monitor) in self.monitors.iter().enumerate() {
-            let draw = self.xft.new_draw(monitor.pixmap.resource_id() as u64);
-            let Some(Some(SingleDisplay { left, right })) = per_monitor.get(index) else {
-                continue;
-            };
-
-            // Left aligned.
-            let mut cursor_offset = 0;
-            for ColoredText { text, fg, bg } in left {
-                let width = self.xft.string_cursor_offset(&text, &self.font);
-
-                let r = u32::from(bg.0) >> 8;
-                let g = u32::from(bg.1) >> 8;
-                let b = u32::from(bg.2) >> 8;
-                let a = u32::from(bg.3) >> 8;
-                let color = r << 24 | g << 16 | b << 8 | a;
-                self.setup.exec_(&xcb::x::ChangeGc {
-                    gc: self.color_gc,
-                    value_list: &[xcb::x::Gc::Foreground(color)],
-                });
-
-                self.setup.exec_(&xcb::x::PolyFillRectangle {
-                    drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
-                    gc: self.color_gc,
-                    rectangles: &[xcb::x::Rectangle {
-                        x: cursor_offset.try_into().unwrap(),
-                        y: 0,
-                        width: width.try_into().unwrap(),
-                        height: self.height.try_into().unwrap(),
-                    }],
-                });
-
-                let fg = self.xft.create_color(*fg);
-                self.xft.draw_string(
-                    &text,
-                    &draw,
-                    &fg,
-                    &self.font,
-                    self.height as u32,
-                    cursor_offset,
-                );
-                cursor_offset += width;
-            }
-
-            // Right aligned.
-            let mut text_width = 0;
-            let cursor_offsets = right
+        self.setup.fill_rects(
+            &self
+                .monitors
                 .iter()
-                .map(|text| {
-                    let cursor_offset = self.xft.string_cursor_offset(&text.text, &self.font);
-                    text_width += cursor_offset;
-                    cursor_offset
+                .map(|monitor| {
+                    (
+                        x::Drawable::Pixmap(monitor.pixmap),
+                        self.clear_gc,
+                        0,
+                        0,
+                        monitor.w,
+                        self.height,
+                    )
                 })
-                .collect::<Vec<_>>();
-
-            let mut cursor_offset = monitor.w - text_width;
-            for (ColoredText { text, fg, .. }, offset) in
-                right.iter().zip(cursor_offsets.into_iter())
-            {
-                let fg = self.xft.create_color(*fg);
-                self.xft
-                    .draw_string(text, &draw, &fg, &self.font, self.height, cursor_offset);
-                cursor_offset += offset;
-            }
-        }
-
-        // let draw = self.xft.new_draw(self.monitors[0].pixmap.resource_id() as u64);
-        // draw.draw_string(text);
+                .collect::<Vec<_>>(),
+        );
     }
+
+    fn cache_colors(&mut self, monitor_index: usize, texts: &[ColoredText]) {
+        let pixmap = self.monitors[monitor_index].pixmap;
+        let drawable = x::Drawable::Pixmap(pixmap);
+        texts
+            .iter()
+            .for_each(|item| self.cache_color(drawable, &item.bg));
+    }
+
+    fn render_handles(&self, monitor_index: usize) -> (x::Drawable, xft::Draw, u32) {
+        let monitor = &self.monitors[monitor_index];
+        let pixmap = monitor.pixmap;
+        (
+            x::Drawable::Pixmap(pixmap),
+            self.xft.new_draw(pixmap.resource_id() as u64),
+            monitor.w,
+        )
+    }
+
+    fn render_string_left(&self, monitor_index: usize, texts: &[ColoredText]) {
+        let (draw, text_draw, _) = self.render_handles(monitor_index);
+
+        let mut cursor_offset = 0;
+        for ColoredText { text, fg, bg } in texts {
+            let width = self.xft.string_cursor_offset(&text, &self.font);
+
+            // Background color.
+            let color_gc = self.get_color(bg);
+            let rect = (draw, color_gc, cursor_offset, 0, width, self.height);
+            self.setup.fill_rects(&[rect]);
+
+            // Foreground text.
+            let fg = self.xft.create_color(*fg);
+            self.xft.draw_string(
+                &text,
+                &text_draw,
+                &fg,
+                &self.font,
+                self.height as u32,
+                cursor_offset,
+            );
+            cursor_offset += width;
+        }
+    }
+
+    fn render_string_right(&self, monitor_index: usize, texts: &[ColoredText]) {
+        let (draw, text_draw, monitor_width) = self.render_handles(monitor_index);
+
+        let mut text_width = 0;
+        let text_widths = texts
+            .iter()
+            .map(|text| {
+                let cursor_offset = self.xft.string_cursor_offset(&text.text, &self.font);
+                text_width += cursor_offset;
+                cursor_offset
+            })
+            .collect::<Vec<_>>();
+
+        let mut cursor_offset = monitor_width - text_width;
+        for (ColoredText { text, fg, bg }, width) in texts.iter().zip(text_widths.into_iter()) {
+            // Background color.
+            let color_gc = self.get_color(bg);
+            let rect = (draw, color_gc, cursor_offset, 0, width, self.height);
+            self.setup.fill_rects(&[rect]);
+
+            // Foreground text.
+            let fg = self.xft.create_color(*fg);
+            self.xft.draw_string(
+                text,
+                &text_draw,
+                &fg,
+                &self.font,
+                self.height,
+                cursor_offset,
+            );
+            cursor_offset += width;
+        }
+    }
+
+    pub fn render_string(
+        &mut self,
+        monitor_index: usize,
+        alignment: Alignment,
+        texts: &[ColoredText],
+    ) {
+        self.cache_colors(monitor_index, texts);
+        match alignment {
+            Alignment::Left => self.render_string_left(monitor_index, texts),
+            Alignment::Right => self.render_string_right(monitor_index, texts),
+        }
+    }
+
+    fn blit(&self) {
+        self.setup.copy_areas(
+            &self
+                .monitors
+                .iter()
+                .map(|monitor| {
+                    (
+                        monitor.pixmap,
+                        monitor.window,
+                        self.clear_gc,
+                        monitor.w,
+                        self.height,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+}
+
+fn render(bar: &mut Bar) {
+    let red = (65535, 0, 0, 65535);
+    let blue = (0, 0, 65535, 65535);
+    let black = (0, 0, 0, 65535);
+    let white = (65535, 65535, 65535, 65535);
+    let green = (0, 65535, 0, 65535);
+
+    bar.clear_monitors();
+    bar.render_string(
+        0,
+        Alignment::Left,
+        &[
+            ColoredText {
+                text: "".to_owned(),
+                fg: white,
+                bg: red,
+            },
+            ColoredText {
+                text: "t s g g s y j p g a g         ".to_owned(),
+                fg: red,
+                bg: white,
+            },
+            ColoredText {
+                text: "".to_owned(),
+                fg: white,
+                bg: red,
+            },
+            ColoredText {
+                text: "leftlast1".to_owned(),
+                fg: black,
+                bg: blue,
+            },
+        ],
+    );
+
+    bar.render_string(
+        0,
+        Alignment::Right,
+        &[
+            ColoredText {
+                text: "rightfirst1".to_owned(),
+                fg: green,
+                bg: red,
+            },
+            ColoredText {
+                text: "rightlast1".to_owned(),
+                fg: white,
+                bg: black,
+            },
+        ],
+    );
+
+    bar.render_string(
+        1,
+        Alignment::Left,
+        &[
+            ColoredText {
+                text: "tsggsyjpgagOQIWUOEIRJSLKN<VMCXNV".to_owned(),
+                fg: red,
+                bg: white,
+            },
+            ColoredText {
+                text: "white black".to_owned(),
+                fg: white,
+                bg: black,
+            },
+            ColoredText {
+                text: "white red".to_owned(),
+                fg: white,
+                bg: red,
+            },
+            ColoredText {
+                text: "white blue".to_owned(),
+                fg: white,
+                bg: blue,
+            },
+            ColoredText {
+                text: "white green".to_owned(),
+                fg: white,
+                bg: green,
+            },
+        ],
+    );
+
+    bar.render_string(
+        1,
+        Alignment::Right,
+        &[
+            ColoredText {
+                text: "          ".to_owned(),
+                fg: white,
+                bg: red,
+            },
+            ColoredText {
+                text: "".to_owned(),
+                fg: green,
+                bg: white,
+            },
+        ],
+    );
 }
 
 fn main() {
     // TODO handle signals.
-
     // TODO Use execution path: arg0.
-    let _instance_name = "saftladen";
+    // TODO Handle ARGS
+    // TODO clickable areas.
 
     // Connect to the Xserver and initialize scr
     let mut bar = Bar::new();
 
-    // TODO Handle ARGS
-    // TODO clickable areas.
+    render(&mut bar);
+    bar.blit();
+    bar.setup.flush();
 
     loop {
         let mut redraw = false;
-        match bar.setup.wait_for_event() {
-            Ok(event) => match event {
-                xcb::Event::X(event) => {
-                    match event {
-                        xcb::x::Event::ButtonPress(_) => {
-                            bar.clear_monitors();
-                            bar.render_string("lol");
-                            redraw = true;
-                        }
-                        _ => { dbg!(&event); }
-                        // xcb::x::Event::KeyRelease(_) => todo!(),
-                        // xcb::x::Event::ButtonPress(_) => todo!(),
-                        // xcb::x::Event::ButtonRelease(_) => todo!(),
-                        // xcb::x::Event::MotionNotify(_) => todo!(),
-                        // xcb::x::Event::EnterNotify(_) => todo!(),
-                        // xcb::x::Event::LeaveNotify(_) => todo!(),
-                        // xcb::x::Event::FocusIn(_) => todo!(),
-                        // xcb::x::Event::FocusOut(_) => todo!(),
-                        // xcb::x::Event::KeymapNotify(_) => todo!(),
-                        // xcb::x::Event::Expose(_) => todo!(),
-                        // xcb::x::Event::GraphicsExposure(_) => todo!(),
-                        // xcb::x::Event::NoExposure(_) => todo!(),
-                        // xcb::x::Event::VisibilityNotify(_) => todo!(),
-                        // xcb::x::Event::CreateNotify(_) => todo!(),
-                        // xcb::x::Event::DestroyNotify(_) => todo!(),
-                        // xcb::x::Event::UnmapNotify(_) => todo!(),
-                        // xcb::x::Event::MapNotify(_) => todo!(),
-                        // xcb::x::Event::MapRequest(_) => todo!(),
-                        // xcb::x::Event::ReparentNotify(_) => todo!(),
-                        // xcb::x::Event::ConfigureNotify(_) => todo!(),
-                        // xcb::x::Event::ConfigureRequest(_) => todo!(),
-                        // xcb::x::Event::GravityNotify(_) => todo!(),
-                        // xcb::x::Event::ResizeRequest(_) => todo!(),
-                        // xcb::x::Event::CirculateNotify(_) => todo!(),
-                        // xcb::x::Event::CirculateRequest(_) => todo!(),
-                        // xcb::x::Event::PropertyNotify(_) => todo!(),
-                        // xcb::x::Event::SelectionClear(_) => todo!(),
-                        // xcb::x::Event::SelectionRequest(_) => todo!(),
-                        // xcb::x::Event::SelectionNotify(_) => todo!(),
-                        // xcb::x::Event::ColormapNotify(_) => todo!(),
-                        // xcb::x::Event::ClientMessage(_) => todo!(),
-                        // xcb::x::Event::MappingNotify(_) => todo!(),
-                    }
-                }
-                xcb::Event::RandR(event) => {
-                    dbg!(&event);
-                }
-                xcb::Event::Unknown(event) => {
-                    dbg!(&event);
-                }
-            },
-            Err(err) => {
-                panic!("{:?}", err);
-            }
-        }
+
+        render(&mut bar);
+        redraw = true;
 
         if redraw {
-            for monitor in &bar.monitors {
-                bar.setup.exec_(&xcb::x::CopyArea {
-                    src_drawable: xcb::x::Drawable::Pixmap(monitor.pixmap),
-                    dst_drawable: xcb::x::Drawable::Window(monitor.window),
-                    gc: bar.clear_gc,
-                    src_x: 0,
-                    src_y: 0,
-                    dst_x: 0,
-                    dst_y: 0,
-                    width: monitor.w.try_into().unwrap(),
-                    height: bar.height.try_into().unwrap(),
-                });
-            }
+            bar.blit();
         }
-
-        bar.setup.flush().unwrap();
+        bar.setup.flush();
+        std::thread::sleep(std::time::Duration::from_secs(3));
     }
 }

@@ -20,6 +20,7 @@ impl Drop for Color {
 }
 
 /// Smart object for `XftFont` pointers.
+#[derive(Debug)]
 pub struct Font {
     font: *mut xft::XftFont,
     ascent: u32,
@@ -61,7 +62,7 @@ impl Xft {
     }
 
     /// Create a color object, wrap it into a smart object and store.
-    pub fn create_color(&mut self, rgba: RGBA) -> Color {
+    pub fn create_color(&self, rgba: RGBA) -> Color {
         let mut render_color = xrender::XRenderColor {
             red: rgba.0,
             green: rgba.1,
@@ -108,7 +109,8 @@ impl Xft {
     }
 
     /// Load a font by pattern, wrap it into a smart object and store.
-    pub fn create_font(&mut self, font_pattern: &[u8]) -> Font {
+    /// Trailing 0 required for `font_pattern`!
+    pub fn create_font(&mut self, font_pattern: &str) -> Font {
         let display = self.display;
         let pattern_ptr = font_pattern.as_ptr() as *const i8;
         let font = unsafe { xft::XftFontOpenName(display, 0, pattern_ptr) };
@@ -140,7 +142,7 @@ impl Xft {
         Draw { draw }
     }
 
-    pub fn string_cursor_offset(&mut self, text: &str, font: &Font) -> u32 {
+    pub fn string_cursor_offset(&self, text: &str, font: &Font) -> u32 {
         let text_ptr = text.as_ptr();
         let text_len = text.len() as i32;
         let mut extents = xrender::XGlyphInfo {
@@ -159,7 +161,7 @@ impl Xft {
     }
 
     pub fn draw_string(
-        &mut self,
+        &self,
         text: &str,
         draw: &Draw,
         color: &Color,
