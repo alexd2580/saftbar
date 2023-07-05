@@ -1,4 +1,4 @@
-# Saftladen
+# Saftbar
 
 I really love reimplementing stuff over and over again. This is the
 continuation of the quest for a "nice" allrounder i3 bar which fits my

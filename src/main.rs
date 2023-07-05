@@ -101,7 +101,7 @@ impl Bar {
 
             let window_type_dock = [window_type_dock];
             let state_sticky = [state_sticky];
-            let name_bytes = "saftladen".as_bytes();
+            let name_bytes = "saftbar".as_bytes();
             let properties = [
                 (desktop, Cardinal(&[u32::MAX])),
                 (window_type, Atom(&window_type_dock)),
