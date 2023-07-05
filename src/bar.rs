@@ -1,12 +1,9 @@
-mod connection;
-mod setup;
-mod xft;
-
 use std::collections::HashMap;
 
-use setup::{compare_rectangles, Rectangle, Setup};
 use xcb::{x, Xid};
-use xft::{Font, Xft, RGBA};
+
+use crate::setup::{compare_rectangles, PropertyData, Rectangle, Setup};
+use crate::xft::{Draw, Font, Xft, RGBA};
 
 struct Monitor {
     x: u32,
@@ -97,7 +94,7 @@ impl Bar {
                     "_NET_WM_STRUT",
                 ]);
 
-            use setup::PropertyData::{Atom, Cardinal, String};
+            use PropertyData::{Atom, Cardinal, String};
 
             let window_type_dock = [window_type_dock];
             let state_sticky = [state_sticky];
@@ -151,6 +148,10 @@ impl Bar {
             xft.create_font(&font_pattern)
         };
 
+        // TODO handle signals.
+        // TODO Use execution path: arg0.
+        // TODO clickable areas.
+
         Self {
             height,
             setup,
@@ -182,7 +183,7 @@ impl Bar {
         *self.color_gcs.get(rgba).unwrap()
     }
 
-    fn clear_monitors(&self) {
+    pub fn clear_monitors(&self) {
         self.setup.fill_rects(
             &self
                 .monitors
@@ -209,7 +210,7 @@ impl Bar {
             .for_each(|item| self.cache_color(drawable, &item.bg));
     }
 
-    fn render_handles(&self, monitor_index: usize) -> (x::Drawable, xft::Draw, u32) {
+    fn render_handles(&self, monitor_index: usize) -> (x::Drawable, Draw, u32) {
         let monitor = &self.monitors[monitor_index];
         let pixmap = monitor.pixmap;
         (
@@ -292,7 +293,7 @@ impl Bar {
         }
     }
 
-    fn blit(&self) {
+    pub fn blit(&self) {
         self.setup.copy_areas(
             &self
                 .monitors
@@ -309,133 +310,8 @@ impl Bar {
                 .collect::<Vec<_>>(),
         );
     }
-}
 
-fn render(bar: &mut Bar) {
-    let red = (65535, 0, 0, 65535);
-    let blue = (0, 0, 65535, 65535);
-    let black = (0, 0, 0, 65535);
-    let white = (65535, 65535, 65535, 65535);
-    let green = (0, 65535, 0, 65535);
-
-    bar.clear_monitors();
-    bar.render_string(
-        0,
-        Alignment::Left,
-        &[
-            ColoredText {
-                text: "".to_owned(),
-                fg: white,
-                bg: red,
-            },
-            ColoredText {
-                text: "t s g g s y j p g a g         ".to_owned(),
-                fg: red,
-                bg: white,
-            },
-            ColoredText {
-                text: "".to_owned(),
-                fg: white,
-                bg: red,
-            },
-            ColoredText {
-                text: "leftlast1".to_owned(),
-                fg: black,
-                bg: blue,
-            },
-        ],
-    );
-
-    bar.render_string(
-        0,
-        Alignment::Right,
-        &[
-            ColoredText {
-                text: "rightfirst1".to_owned(),
-                fg: green,
-                bg: red,
-            },
-            ColoredText {
-                text: "rightlast1".to_owned(),
-                fg: white,
-                bg: black,
-            },
-        ],
-    );
-
-    bar.render_string(
-        1,
-        Alignment::Left,
-        &[
-            ColoredText {
-                text: "tsggsyjpgagOQIWUOEIRJSLKN<VMCXNV".to_owned(),
-                fg: red,
-                bg: white,
-            },
-            ColoredText {
-                text: "white black".to_owned(),
-                fg: white,
-                bg: black,
-            },
-            ColoredText {
-                text: "white red".to_owned(),
-                fg: white,
-                bg: red,
-            },
-            ColoredText {
-                text: "white blue".to_owned(),
-                fg: white,
-                bg: blue,
-            },
-            ColoredText {
-                text: "white green".to_owned(),
-                fg: white,
-                bg: green,
-            },
-        ],
-    );
-
-    bar.render_string(
-        1,
-        Alignment::Right,
-        &[
-            ColoredText {
-                text: "          ".to_owned(),
-                fg: white,
-                bg: red,
-            },
-            ColoredText {
-                text: "".to_owned(),
-                fg: green,
-                bg: white,
-            },
-        ],
-    );
-}
-
-fn main() {
-    // TODO handle signals.
-    // TODO Use execution path: arg0.
-    // TODO Handle ARGS
-    // TODO clickable areas.
-
-    // Connect to the Xserver and initialize scr
-    let mut bar = Bar::new();
-
-    render(&mut bar);
-    bar.blit();
-    bar.setup.flush();
-
-    loop {
-        let mut redraw = false;
-
-        render(&mut bar);
-        redraw = true;
-
-        if redraw {
-            bar.blit();
-        }
-        bar.setup.flush();
-        std::thread::sleep(std::time::Duration::from_secs(3));
+    pub fn flush(&self) {
+        self.setup.flush();
     }
 }
