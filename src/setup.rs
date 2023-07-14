@@ -1,6 +1,7 @@
 use std::{cmp::Ordering, ptr::null_mut};
 
 use crate::connection::Connection;
+use crate::error::Error;
 use crate::xft::Xft;
 
 use xcb::Xid;
@@ -37,10 +38,10 @@ impl Rectangle {
 // Order rects from left to right, then from top to bottom.
 // Edge cases for overlapping screens.
 pub fn compare_rectangles(a: &Rectangle, b: &Rectangle) -> Ordering {
-    if a.x != b.x {
-        a.x.cmp(&b.x)
-    } else {
+    if a.x == b.x {
         (a.y + a.h).cmp(&b.y)
+    } else {
+        a.x.cmp(&b.x)
     }
 }
 
@@ -70,7 +71,7 @@ pub struct Setup {
 
 impl Setup {
     /// Create the basic setup for dealing with windows.
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, Error> {
         let connection = Connection::new();
 
         // How the layout looks like.
@@ -78,14 +79,17 @@ impl Setup {
         assert_eq!(setup_info.roots().count(), 1);
 
         // The root screen - rendering canvas.
-        let screen = setup_info.roots().nth(0).unwrap();
+        let screen = setup_info
+            .roots()
+            .next()
+            .ok_or_else(|| Error::Local("Failed to get 0th screen".to_string()))?;
 
         // The root window, which is essentially a rect.
         let root_window = screen.root();
         let visual_id = screen
             .allowed_depths()
             .find_map(|depth| (depth.depth() == 32).then(|| depth.visuals()[0].visual_id()))
-            .unwrap();
+            .ok_or_else(|| Error::Local("Failed to find 32bit depth visual".to_string()))?;
 
         let display = connection.get_raw_dpy();
         let mut visual_info_mask = x11::xlib::XVisualInfo {
@@ -105,16 +109,16 @@ impl Setup {
             x11::xlib::XGetVisualInfo(
                 display,
                 x11::xlib::VisualDepthMask,
-                &mut visual_info_mask as *mut x11::xlib::XVisualInfo,
-                &mut result as *mut i32,
+                std::ptr::addr_of_mut!(visual_info_mask),
+                std::ptr::addr_of_mut!(result),
             )
         };
         let visual_info = unsafe { *visual_info };
-        assert_eq!(visual_info.visualid, visual_id as u64);
+        assert_eq!(visual_info.visualid, u64::from(visual_id));
         let visual = visual_info.visual;
 
-        let width = screen.width_in_pixels().try_into().unwrap();
-        let height = screen.height_in_pixels().try_into().unwrap();
+        let width = u32::from(screen.width_in_pixels());
+        let height = u32::from(screen.height_in_pixels());
 
         let colormap: x::Colormap = connection.generate_id();
         connection.exec_(&x::CreateColormap {
@@ -122,43 +126,48 @@ impl Setup {
             mid: colormap,
             window: root_window,
             visual: visual_id,
-        });
+        })?;
 
-        Self {
-            connection,
-            root_window,
+        Ok(Self {
             width,
             height,
-            visual_id,
-            visual,
             colormap,
-        }
+            visual,
+            visual_id,
+            root_window,
+            connection,
+        })
     }
 
-    pub fn get_screen_resources(&self) -> randr::GetScreenResourcesCurrentReply {
+    pub fn get_screen_resources(&self) -> Result<randr::GetScreenResourcesCurrentReply, Error> {
         self.connection.exec(&randr::GetScreenResourcesCurrent {
             window: self.root_window,
         })
     }
 
     /// Retrieve the crtc info for a given output.
-    pub fn get_crtc_info(&self, output: randr::Output) -> Option<randr::GetCrtcInfoReply> {
+    pub fn get_crtc_info(
+        &self,
+        output: randr::Output,
+    ) -> Result<Option<randr::GetCrtcInfoReply>, Error> {
         let config_timestamp = x::CURRENT_TIME;
         let output_info = self.connection.exec(&randr::GetOutputInfo {
             output,
             config_timestamp,
-        });
+        })?;
 
         let crtc = output_info.crtc();
-        if crtc.is_none() || output_info.connection() != randr::Connection::Connected {
-            // Something fishy, skup this output.
-            return None;
-        }
-
-        Some(self.connection.exec(&randr::GetCrtcInfo {
-            crtc,
-            config_timestamp,
-        }))
+        Ok(
+            if crtc.is_none() || output_info.connection() != randr::Connection::Connected {
+                // Something fishy, skip this output.
+                None
+            } else {
+                Some(self.connection.exec(&randr::GetCrtcInfo {
+                    crtc,
+                    config_timestamp,
+                })?)
+            },
+        )
     }
 
     /// Send and await multiple void requests in parallel.
@@ -178,12 +187,13 @@ impl Setup {
         &self,
         data: &[T],
         send_request: impl Fn(&T) -> xcb::VoidCookieChecked,
-    ) {
+    ) -> Result<(), Error> {
         data.iter()
             .map(send_request)
             .collect::<Vec<_>>()
             .into_iter()
-            .for_each(|cookie| self.connection.check_request(cookie).unwrap());
+            .try_for_each(|cookie| self.connection.check_request(cookie))?;
+        Ok(())
     }
 
     pub fn create_window_and_pixmap(
@@ -193,7 +203,7 @@ impl Setup {
         width: u32,
         height: u32,
         colormap: x::Colormap,
-    ) -> (x::Window, x::Pixmap) {
+    ) -> Result<(x::Window, x::Pixmap), Error> {
         let window = self.connection.generate_id();
         let depth = 32; // TODO (visual == scr->root_visual) ? XCB_COPY_FROM_PARENT : 32;
 
@@ -212,13 +222,13 @@ impl Setup {
             class: x::WindowClass::InputOutput,
             visual: self.visual_id,
             value_list: &[
-                x::Cw::BackPixel(0x00000000),
-                x::Cw::BorderPixel(0x00000000),
+                x::Cw::BackPixel(0x0000_0000),
+                x::Cw::BorderPixel(0x0000_0000),
                 x::Cw::OverrideRedirect(false), // EMWH noncompliant (TODO what do i mean?)
                 x::Cw::EventMask(x::EventMask::EXPOSURE | x::EventMask::BUTTON_PRESS),
                 x::Cw::Colormap(colormap),
             ],
-        });
+        })?;
 
         let pixmap = self.connection.generate_id();
         self.connection.exec_(&x::CreatePixmap {
@@ -227,9 +237,9 @@ impl Setup {
             drawable: x::Drawable::Window(window),
             width,
             height,
-        });
+        })?;
 
-        (window, pixmap)
+        Ok((window, pixmap))
     }
 
     pub fn get_atoms<const N: usize>(&self, atom_names: &[&str; N]) -> [x::Atom; N] {
@@ -245,9 +255,14 @@ impl Setup {
             .map(|cookie| conn.wait_for_reply(cookie).unwrap().atom())
     }
 
-    pub fn replace_properties(&self, window: x::Window, properties: &[(x::Atom, PropertyData)]) {
-        let conn = &self.connection;
+    pub fn replace_properties(
+        &self,
+        window: x::Window,
+        properties: &[(x::Atom, PropertyData)],
+    ) -> Result<(), Error> {
         use PropertyData::{Atom, Cardinal, String};
+
+        let conn = &self.connection;
         let mode = x::PropMode::Replace;
         self.pipeline_requests(properties, |&(property, ref data)| match data {
             Cardinal(data) => conn.send_request_checked(&x::ChangeProperty {
@@ -271,37 +286,41 @@ impl Setup {
                 r#type: x::ATOM_STRING,
                 data,
             }),
-        });
+        })
     }
 
     /// Display windows.
-    pub fn map_windows(&self, windows: &[x::Window]) {
+    pub fn map_windows(&self, windows: &[x::Window]) -> Result<(), Error> {
         self.pipeline_requests(windows, |&window| {
             self.connection
                 .send_request_checked(&x::MapWindow { window })
-        });
+        })
     }
 
-    pub fn create_gc(&self, drawable: x::Drawable, value_list: &[x::Gc]) -> x::Gcontext {
+    pub fn create_gc(
+        &self,
+        drawable: x::Drawable,
+        value_list: &[x::Gc],
+    ) -> Result<x::Gcontext, Error> {
         let cid = self.connection.generate_id();
         self.connection.exec_(&x::CreateGc {
             cid,
             drawable,
             value_list,
-        });
-        cid
+        })?;
+        Ok(cid)
     }
 
     pub fn create_xft(&self) -> Xft {
         Xft::new(
             self.connection.get_raw_dpy(),
             self.visual,
-            self.colormap.resource_id() as u64,
+            u64::from(self.colormap.resource_id()),
         )
     }
 
-    pub fn fill_rects(&self, rects: &[RectSpec]) {
-        self.pipeline_requests(rects, &|&(drawable, gc, x, y, w, h): &RectSpec| {
+    pub fn fill_rects(&self, rects: &[RectSpec]) -> Result<(), Error> {
+        self.pipeline_requests(rects, |&(drawable, gc, x, y, w, h): &RectSpec| {
             self.connection.send_request_checked(&x::PolyFillRectangle {
                 drawable,
                 gc,
@@ -312,11 +331,11 @@ impl Setup {
                     height: h.try_into().unwrap(),
                 }],
             })
-        });
+        })
     }
 
-    pub fn copy_areas(&self, areas: &[AreaSpec]) {
-        self.pipeline_requests(areas, &|&(pixmap, window, gc, w, h): &AreaSpec| {
+    pub fn copy_areas(&self, areas: &[AreaSpec]) -> Result<(), Error> {
+        self.pipeline_requests(areas, |&(pixmap, window, gc, w, h): &AreaSpec| {
             self.connection.send_request_checked(&x::CopyArea {
                 src_drawable: x::Drawable::Pixmap(pixmap),
                 dst_drawable: x::Drawable::Window(window),
@@ -328,10 +347,11 @@ impl Setup {
                 width: w.try_into().unwrap(),
                 height: h.try_into().unwrap(),
             })
-        });
+        })
     }
 
-    pub fn flush(&self) {
-        self.connection.flush().unwrap();
+    pub fn flush(&self) -> Result<(), Error> {
+        self.connection.flush()?;
+        Ok(())
     }
 }

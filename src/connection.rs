@@ -1,5 +1,7 @@
 use std::{ops::Deref, ptr::null};
 
+use crate::error::Error;
+
 pub struct Connection(xcb::Connection);
 
 impl Deref for Connection {
@@ -25,23 +27,20 @@ impl Connection {
     pub fn exec<Request>(
         &self,
         request: &Request,
-    ) -> <<Request as xcb::Request>::Cookie as xcb::CookieWithReplyChecked>::Reply
+    ) -> Result<<<Request as xcb::Request>::Cookie as xcb::CookieWithReplyChecked>::Reply, Error>
     where
         Request: xcb::Request,
         <Request as xcb::Request>::Cookie: xcb::CookieWithReplyChecked,
     {
-        let cookie = self.send_request(request);
-        self.wait_for_reply(cookie).unwrap()
+        Ok(self.wait_for_reply(self.send_request(request))?)
     }
 
     /// Execute a request that has no reply. Check for request completion.
-    pub fn exec_<Request>(&self, request: &Request)
+    pub fn exec_<Request>(&self, request: &Request) -> Result<(), Error>
     where
         Request: xcb::RequestWithoutReply + std::fmt::Debug,
     {
-        if let Err(err) = self.send_and_check_request(request) {
-            dbg!(&request);
-            panic!("{}", err);
-        };
+        self.send_and_check_request(request)?;
+        Ok(())
     }
 }

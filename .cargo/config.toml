@@ -1,0 +1,3 @@
+[alias]
+runx = ["run", "--"]
+lint = ["clippy", "--", "-W", "clippy::pedantic"]

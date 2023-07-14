@@ -1,4 +1,4 @@
-use std::{ops::DerefMut, ptr::null_mut};
+use std::ops::DerefMut;
 
 use x11::{xft, xlib, xrender};
 
@@ -62,6 +62,7 @@ impl Xft {
     }
 
     /// Create a color object, wrap it into a smart object and store.
+    #[must_use]
     pub fn create_color(&self, rgba: RGBA) -> Color {
         let mut render_color = xrender::XRenderColor {
             red: u16::from(rgba.0) << 8,
@@ -89,16 +90,14 @@ impl Xft {
                 display,
                 visual,
                 colormap_id,
-                &mut render_color as *mut xrender::XRenderColor,
-                &mut color as *mut xft::XftColor,
+                std::ptr::addr_of_mut!(render_color),
+                std::ptr::addr_of_mut!(color),
             )
         };
-        if result == 0 {
-            panic!("Failed to create Xft color");
-        }
+        assert_ne!(result, 0, "Failed to create Xft color");
 
         let mut color = Box::new(color);
-        let color_ptr = color.deref_mut() as *mut xft::XftColor;
+        let color_ptr = std::ptr::addr_of_mut!(*color.deref_mut());
         Color {
             color,
             color_ptr,
@@ -112,7 +111,7 @@ impl Xft {
     /// Trailing 0 required for `font_pattern`!
     pub fn create_font(&mut self, font_pattern: &str) -> Font {
         let display = self.display;
-        let pattern_ptr = font_pattern.as_ptr() as *const i8;
+        let pattern_ptr = font_pattern.as_ptr().cast::<i8>();
         let font = unsafe { xft::XftFontOpenName(display, 0, pattern_ptr) };
         let (ascent, descent) = unsafe {
             (
@@ -120,9 +119,7 @@ impl Xft {
                 (*font).descent.try_into().unwrap(),
             )
         };
-        if font == null_mut() {
-            panic!("Failed to create Xft font");
-        }
+        assert!(!font.is_null(), "Failed to create Xft font");
 
         Font {
             font,
@@ -132,19 +129,19 @@ impl Xft {
         }
     }
 
+    #[must_use]
     pub fn new_draw(&self, pixmap_id: u64) -> Draw {
         let draw =
             unsafe { xft::XftDrawCreate(self.display, pixmap_id, self.visual, self.colormap_id) };
-        if draw == null_mut() {
-            panic!("Failed to create Xft draw");
-        }
+        assert!(!draw.is_null(), "Failed to create Xft draw");
 
         Draw { draw }
     }
 
+    #[must_use]
     pub fn string_cursor_offset(&self, text: &str, font: &Font) -> u32 {
         let text_ptr = text.as_ptr();
-        let text_len = text.len() as i32;
+        let text_len = i32::try_from(text.len()).unwrap();
         let mut extents = xrender::XGlyphInfo {
             width: 0,
             height: 0,
@@ -154,7 +151,7 @@ impl Xft {
             yOff: 0,
         };
         unsafe {
-            let extents_ptr = &mut extents as *mut xrender::XGlyphInfo;
+            let extents_ptr = std::ptr::addr_of_mut!(extents);
             xft::XftTextExtentsUtf8(self.display, font.font, text_ptr, text_len, extents_ptr);
             extents.xOff.try_into().unwrap()
         }
@@ -170,7 +167,7 @@ impl Xft {
         cursor_offset: u32,
     ) {
         let text_ptr = text.as_ptr();
-        let text_len = text.len() as i32;
+        let text_len = i32::try_from(text.len()).unwrap();
         let baseline_offset = (canvas_height + font.ascent - font.descent) / 2;
         unsafe {
             xft::XftDrawStringUtf8(
@@ -181,7 +178,7 @@ impl Xft {
                 baseline_offset.try_into().unwrap(),
                 text_ptr,
                 text_len,
-            )
-        };
+            );
+        }
     }
 }
