@@ -1,7 +1,6 @@
 use std::{cmp::Ordering, ptr::null_mut};
 
 use crate::connection::Connection;
-use crate::error::Error;
 use crate::xft::Xft;
 
 use xcb::Xid;
@@ -20,8 +19,8 @@ impl From<&randr::GetCrtcInfoReply> for Rectangle {
         Self {
             x: value.x().try_into().unwrap(),
             y: value.y().try_into().unwrap(),
-            w: value.width().try_into().unwrap(),
-            h: value.height().try_into().unwrap(),
+            w: value.width().into(),
+            h: value.height().into(),
         }
     }
 }
@@ -58,8 +57,8 @@ pub enum PropertyData<'a> {
 }
 
 pub struct Setup {
-    width: u32,
-    height: u32,
+    // width: u32,
+    // height: u32,
 
     // Note the reverse drop order! Children first.
     pub colormap: x::Colormap,
@@ -71,7 +70,7 @@ pub struct Setup {
 
 impl Setup {
     /// Create the basic setup for dealing with windows.
-    pub fn new() -> Result<Self, Error> {
+    pub fn new() -> Self {
         let connection = Connection::new();
 
         // How the layout looks like.
@@ -79,17 +78,14 @@ impl Setup {
         assert_eq!(setup_info.roots().count(), 1);
 
         // The root screen - rendering canvas.
-        let screen = setup_info
-            .roots()
-            .next()
-            .ok_or_else(|| Error::Local("Failed to get 0th screen".to_string()))?;
+        let screen = setup_info.roots().next().expect("Failed to get 0th screen");
 
         // The root window, which is essentially a rect.
         let root_window = screen.root();
         let visual_id = screen
             .allowed_depths()
             .find_map(|depth| (depth.depth() == 32).then(|| depth.visuals()[0].visual_id()))
-            .ok_or_else(|| Error::Local("Failed to find 32bit depth visual".to_string()))?;
+            .expect("Failed to find 32bit depth visual");
 
         let display = connection.get_raw_dpy();
         let mut visual_info_mask = x11::xlib::XVisualInfo {
@@ -117,57 +113,61 @@ impl Setup {
         assert_eq!(visual_info.visualid, u64::from(visual_id));
         let visual = visual_info.visual;
 
-        let width = u32::from(screen.width_in_pixels());
-        let height = u32::from(screen.height_in_pixels());
+        // let width = u32::from(screen.width_in_pixels());
+        // let height = u32::from(screen.height_in_pixels());
 
         let colormap: x::Colormap = connection.generate_id();
-        connection.exec_(&x::CreateColormap {
-            alloc: x::ColormapAlloc::None,
-            mid: colormap,
-            window: root_window,
-            visual: visual_id,
-        })?;
+        connection
+            .exec_(&x::CreateColormap {
+                alloc: x::ColormapAlloc::None,
+                mid: colormap,
+                window: root_window,
+                visual: visual_id,
+            })
+            .expect("Failed to create colormap");
 
-        Ok(Self {
-            width,
-            height,
+        Self {
+            // width,
+            // height,
             colormap,
             visual,
             visual_id,
             root_window,
             connection,
-        })
+        }
     }
 
-    pub fn get_screen_resources(&self) -> Result<randr::GetScreenResourcesCurrentReply, Error> {
-        self.connection.exec(&randr::GetScreenResourcesCurrent {
-            window: self.root_window,
-        })
+    pub fn get_screen_resources(&self) -> randr::GetScreenResourcesCurrentReply {
+        self.connection
+            .exec(&randr::GetScreenResourcesCurrent {
+                window: self.root_window,
+            })
+            .expect("Failed to get screen resources")
     }
 
     /// Retrieve the crtc info for a given output.
-    pub fn get_crtc_info(
-        &self,
-        output: randr::Output,
-    ) -> Result<Option<randr::GetCrtcInfoReply>, Error> {
+    pub fn get_crtc_info(&self, output: randr::Output) -> Option<randr::GetCrtcInfoReply> {
         let config_timestamp = x::CURRENT_TIME;
-        let output_info = self.connection.exec(&randr::GetOutputInfo {
-            output,
-            config_timestamp,
-        })?;
+        let output_info = self
+            .connection
+            .exec(&randr::GetOutputInfo {
+                output,
+                config_timestamp,
+            })
+            .expect("Failed to get output info");
 
         let crtc = output_info.crtc();
-        Ok(
-            if crtc.is_none() || output_info.connection() != randr::Connection::Connected {
-                // Something fishy, skip this output.
-                None
-            } else {
-                Some(self.connection.exec(&randr::GetCrtcInfo {
+        // Require that crtcs are connected and not none.
+        let valid_crtc =
+            !crtc.is_none() && output_info.connection() == randr::Connection::Connected;
+        valid_crtc.then(|| {
+            self.connection
+                .exec(&randr::GetCrtcInfo {
                     crtc,
                     config_timestamp,
-                })?)
-            },
-        )
+                })
+                .expect("Failed to get crtc info")
+        })
     }
 
     /// Send and await multiple void requests in parallel.
@@ -187,13 +187,12 @@ impl Setup {
         &self,
         data: &[T],
         send_request: impl Fn(&T) -> xcb::VoidCookieChecked,
-    ) -> Result<(), Error> {
+    ) -> Result<(), xcb::ProtocolError> {
         data.iter()
             .map(send_request)
             .collect::<Vec<_>>()
             .into_iter()
-            .try_for_each(|cookie| self.connection.check_request(cookie))?;
-        Ok(())
+            .try_for_each(|cookie| self.connection.check_request(cookie))
     }
 
     pub fn create_window_and_pixmap(
@@ -203,43 +202,47 @@ impl Setup {
         width: u32,
         height: u32,
         colormap: x::Colormap,
-    ) -> Result<(x::Window, x::Pixmap), Error> {
+    ) -> (x::Window, x::Pixmap) {
         let window = self.connection.generate_id();
         let depth = 32; // TODO (visual == scr->root_visual) ? XCB_COPY_FROM_PARENT : 32;
 
         let width = width.try_into().unwrap();
         let height = height.try_into().unwrap();
 
-        self.connection.exec_(&x::CreateWindow {
-            depth,
-            wid: window,
-            parent: self.root_window,
-            x: x.try_into().unwrap(),
-            y: y.try_into().unwrap(),
-            width,
-            height,
-            border_width: 0,
-            class: x::WindowClass::InputOutput,
-            visual: self.visual_id,
-            value_list: &[
-                x::Cw::BackPixel(0x0000_0000),
-                x::Cw::BorderPixel(0x0000_0000),
-                x::Cw::OverrideRedirect(false), // EMWH noncompliant (TODO what do i mean?)
-                x::Cw::EventMask(x::EventMask::EXPOSURE | x::EventMask::BUTTON_PRESS),
-                x::Cw::Colormap(colormap),
-            ],
-        })?;
+        self.connection
+            .exec_(&x::CreateWindow {
+                depth,
+                wid: window,
+                parent: self.root_window,
+                x: x.try_into().unwrap(),
+                y: y.try_into().unwrap(),
+                width,
+                height,
+                border_width: 0,
+                class: x::WindowClass::InputOutput,
+                visual: self.visual_id,
+                value_list: &[
+                    x::Cw::BackPixel(0x0000_0000),
+                    x::Cw::BorderPixel(0x0000_0000),
+                    x::Cw::OverrideRedirect(false), // EMWH noncompliant (TODO what do i mean?)
+                    x::Cw::EventMask(x::EventMask::EXPOSURE | x::EventMask::BUTTON_PRESS),
+                    x::Cw::Colormap(colormap),
+                ],
+            })
+            .expect("Failed to create window");
 
         let pixmap = self.connection.generate_id();
-        self.connection.exec_(&x::CreatePixmap {
-            depth,
-            pid: pixmap,
-            drawable: x::Drawable::Window(window),
-            width,
-            height,
-        })?;
+        self.connection
+            .exec_(&x::CreatePixmap {
+                depth,
+                pid: pixmap,
+                drawable: x::Drawable::Window(window),
+                width,
+                height,
+            })
+            .expect("Failed to create pixmap");
 
-        Ok((window, pixmap))
+        (window, pixmap)
     }
 
     pub fn get_atoms<const N: usize>(&self, atom_names: &[&str; N]) -> [x::Atom; N] {
@@ -250,16 +253,16 @@ impl Setup {
                     only_if_exists: true,
                     name: name.as_bytes(),
                 };
-                conn.send_request(&request)
+                (name, conn.send_request(&request))
             })
-            .map(|cookie| conn.wait_for_reply(cookie).unwrap().atom())
+            .map(|(name, cookie)| {
+                conn.wait_for_reply(cookie)
+                    .unwrap_or_else(|err| panic!("Failed to get atom '{name}'; {err}"))
+                    .atom()
+            })
     }
 
-    pub fn replace_properties(
-        &self,
-        window: x::Window,
-        properties: &[(x::Atom, PropertyData)],
-    ) -> Result<(), Error> {
+    pub fn replace_properties(&self, window: x::Window, properties: &[(x::Atom, PropertyData)]) {
         use PropertyData::{Atom, Cardinal, String};
 
         let conn = &self.connection;
@@ -287,28 +290,28 @@ impl Setup {
                 data,
             }),
         })
+        .expect("Failed to replace window properties");
     }
 
     /// Display windows.
-    pub fn map_windows(&self, windows: &[x::Window]) -> Result<(), Error> {
+    pub fn map_windows(&self, windows: &[x::Window]) {
         self.pipeline_requests(windows, |&window| {
             self.connection
                 .send_request_checked(&x::MapWindow { window })
         })
+        .expect("Failed to map windows");
     }
 
-    pub fn create_gc(
-        &self,
-        drawable: x::Drawable,
-        value_list: &[x::Gc],
-    ) -> Result<x::Gcontext, Error> {
+    pub fn create_gc(&self, drawable: x::Drawable, value_list: &[x::Gc]) -> x::Gcontext {
         let cid = self.connection.generate_id();
-        self.connection.exec_(&x::CreateGc {
-            cid,
-            drawable,
-            value_list,
-        })?;
-        Ok(cid)
+        self.connection
+            .exec_(&x::CreateGc {
+                cid,
+                drawable,
+                value_list,
+            })
+            .expect("Failed to create graphics context");
+        cid
     }
 
     pub fn create_xft(&self) -> Xft {
@@ -319,7 +322,7 @@ impl Setup {
         )
     }
 
-    pub fn fill_rects(&self, rects: &[RectSpec]) -> Result<(), Error> {
+    pub fn fill_rects(&self, rects: &[RectSpec]) {
         self.pipeline_requests(rects, |&(drawable, gc, x, y, w, h): &RectSpec| {
             self.connection.send_request_checked(&x::PolyFillRectangle {
                 drawable,
@@ -332,9 +335,10 @@ impl Setup {
                 }],
             })
         })
+        .expect("Failed to fill rectangles");
     }
 
-    pub fn copy_areas(&self, areas: &[AreaSpec]) -> Result<(), Error> {
+    pub fn copy_areas(&self, areas: &[AreaSpec]) {
         self.pipeline_requests(areas, |&(pixmap, window, gc, w, h): &AreaSpec| {
             self.connection.send_request_checked(&x::CopyArea {
                 src_drawable: x::Drawable::Pixmap(pixmap),
@@ -348,10 +352,12 @@ impl Setup {
                 height: h.try_into().unwrap(),
             })
         })
+        .expect("Failed to fill rectangles");
     }
 
-    pub fn flush(&self) -> Result<(), Error> {
-        self.connection.flush()?;
-        Ok(())
+    pub fn flush(&self) {
+        self.connection
+            .flush()
+            .expect("Failed to flush xcb connection");
     }
 }

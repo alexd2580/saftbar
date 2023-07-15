@@ -2,13 +2,12 @@ use std::collections::HashMap;
 
 use xcb::{x, Xid};
 
-use crate::error::Error;
 use crate::setup::{compare_rectangles, PropertyData, Rectangle, Setup};
 use crate::xft::{Draw, Font, Xft, RGBA};
 
 struct Monitor {
     x: u32,
-    y: u32,
+    // y: u32,
     w: u32,
 
     // Note the reverse drop order! Children first.
@@ -41,16 +40,16 @@ pub struct Bar {
 }
 
 impl Bar {
-    pub fn new() -> Result<Self, Error> {
-        let setup = Setup::new()?;
+    pub fn new() -> Self {
+        let setup = Setup::new();
 
-        let screen_resources = setup.get_screen_resources()?;
+        let screen_resources = setup.get_screen_resources();
         let outputs = screen_resources.outputs();
 
         // Get output regions.
         let mut regions = Vec::new();
         for output in outputs {
-            if let Some(crtc_info) = setup.get_crtc_info(*output)? {
+            if let Some(crtc_info) = setup.get_crtc_info(*output) {
                 regions.push(Rectangle::from(&crtc_info));
             }
         }
@@ -69,22 +68,35 @@ impl Bar {
             .collect::<Vec<_>>();
         valid_regions.sort_by(compare_rectangles);
 
-        let height = 20;
+        // Load the font first. Fonts suck and you can't really tell how large a font is before
+        // loading it because fonts suck. You can't even force a font to be a specific size because
+        // fonts suck. E.g. `fontforge`. Compare UbuntuMono and FiraCode. UbuntuMono is just about
+        // the right size BUT ALWAYS ONE PIXEL OFF, FiraCode is ALL OVER THE PLACE! Fonts suck.
+
+        let mut xft = setup.create_xft();
+
+        // This is the ~only~ font that works more or less the way i want it to.
+        // Use the `Propo` variant to get full size icons, while sacrificing monospace, which is
+        // not needed anyway.
+        let font_family = "Ubuntu Mono Nerd Font Propo";
+        let font = xft.create_font(font_family, 20);
+
+        let height = font.height();
         let monitors = valid_regions
             .into_iter()
             .map(|Rectangle { x, y, w, .. }| {
                 let (window, pixmap) =
-                    setup.create_window_and_pixmap(x, y, w, height, setup.colormap)?;
+                    setup.create_window_and_pixmap(x, y, w, height, setup.colormap);
 
-                Ok(Monitor {
+                Monitor {
                     x,
-                    y,
+                    // y,
                     w,
                     pixmap,
                     window,
-                })
+                }
             })
-            .collect::<Result<Vec<_>, Error>>()?;
+            .collect::<Vec<_>>();
 
         // Set EWMH or something values.
         {
@@ -115,7 +127,7 @@ impl Bar {
 
             // Set window properties.
             for monitor in &monitors {
-                setup.replace_properties(monitor.window, &properties)?;
+                setup.replace_properties(monitor.window, &properties);
 
                 let h = height;
                 let sx = monitor.x;
@@ -125,13 +137,13 @@ impl Bar {
                     (strut, Cardinal(&strut_data[..4])),
                     (strut_partial, Cardinal(&strut_data)),
                 ];
-                setup.replace_properties(monitor.window, &monitor_properties)?;
+                setup.replace_properties(monitor.window, &monitor_properties);
             }
         }
 
         // This is needed to get the root/depth. The root window has 24bpp, we want 32. Why?
         let reference_drawable = x::Drawable::Window(monitors[0].window);
-        let clear_gc = setup.create_gc(reference_drawable, &[x::Gc::Foreground(0x0000_0000)])?;
+        let clear_gc = setup.create_gc(reference_drawable, &[x::Gc::Foreground(0x0000_0000)]);
 
         // Make windows visible.
         setup.map_windows(
@@ -139,29 +151,15 @@ impl Bar {
                 .iter()
                 .map(|monitor| monitor.window)
                 .collect::<Vec<_>>(),
-        )?;
+        );
 
-        setup.flush()?;
-
-        // Initialize font.
-        let mut xft = setup.create_xft();
-
-        // wysiwyg
-        let font_family = "Ubuntu Mono Nerd Font Propo";
-        //// font is larger than line height!!!!! 16/20
-        // let font_family = "FiraCode Nerd Font Propo";
-
-        let font = {
-            let font_params = ":pixelsize=20:antialias=true:hinting=true";
-            let font_pattern = format!("{font_family}{font_params}\0");
-            xft.create_font(&font_pattern)
-        };
+        setup.flush();
 
         // TODO handle signals.
         // TODO Use execution path: arg0.
         // TODO clickable areas.
 
-        Ok(Self {
+        Self {
             height,
             setup,
             xft,
@@ -169,10 +167,10 @@ impl Bar {
             monitors,
             clear_gc,
             color_gcs: HashMap::new(),
-        })
+        }
     }
 
-    fn cache_color(&mut self, reference_drawable: x::Drawable, rgba: RGBA) -> Result<(), Error> {
+    fn cache_color(&mut self, reference_drawable: x::Drawable, rgba: RGBA) {
         if self.color_gcs.get(&rgba).is_none() {
             let r = u32::from(rgba.0);
             let g = u32::from(rgba.1);
@@ -182,22 +180,20 @@ impl Bar {
 
             let gc = self
                 .setup
-                .create_gc(reference_drawable, &[x::Gc::Foreground(color)])?;
+                .create_gc(reference_drawable, &[x::Gc::Foreground(color)]);
 
             self.color_gcs.insert(rgba, gc);
         }
-
-        Ok(())
     }
 
-    fn get_color(&self, rgba: RGBA) -> Result<x::Gcontext, Error> {
+    fn get_color(&self, rgba: RGBA) -> x::Gcontext {
         self.color_gcs
             .get(&rgba)
             .copied()
-            .ok_or_else(|| Error::Local(format!("Failed to get color: {rgba:?}")))
+            .expect("Color is not cached")
     }
 
-    pub fn clear_monitors(&self) -> Result<(), Error> {
+    pub fn clear_monitors(&self) {
         self.setup.fill_rects(
             &self
                 .monitors
@@ -213,16 +209,15 @@ impl Bar {
                     )
                 })
                 .collect::<Vec<_>>(),
-        )
+        );
     }
 
-    fn cache_colors(&mut self, monitor_index: usize, texts: &[ColoredText]) -> Result<(), Error> {
+    fn cache_colors(&mut self, monitor_index: usize, texts: &[ColoredText]) {
         let pixmap = self.monitors[monitor_index].pixmap;
         let drawable = x::Drawable::Pixmap(pixmap);
         for text in texts {
-            self.cache_color(drawable, text.bg)?;
+            self.cache_color(drawable, text.bg);
         }
-        Ok(())
     }
 
     fn render_handles(&self, monitor_index: usize) -> (x::Drawable, Draw, u32) {
@@ -235,7 +230,7 @@ impl Bar {
         )
     }
 
-    fn render_string_left(&self, monitor_index: usize, texts: &[ColoredText]) -> Result<(), Error> {
+    fn render_string_left(&self, monitor_index: usize, texts: &[ColoredText]) {
         let (draw, text_draw, _) = self.render_handles(monitor_index);
 
         let mut cursor_offset = 0;
@@ -243,9 +238,9 @@ impl Bar {
             let width = self.xft.string_cursor_offset(text, &self.font);
 
             // Background color.
-            let color_gc = self.get_color(*bg)?;
+            let color_gc = self.get_color(*bg);
             let rect = (draw, color_gc, cursor_offset, 0, width, self.height);
-            self.setup.fill_rects(&[rect])?;
+            self.setup.fill_rects(&[rect]);
 
             // Foreground text.
             let fg = self.xft.create_color(*fg);
@@ -259,15 +254,9 @@ impl Bar {
             );
             cursor_offset += width;
         }
-
-        Ok(())
     }
 
-    fn render_string_right(
-        &self,
-        monitor_index: usize,
-        texts: &[ColoredText],
-    ) -> Result<(), Error> {
+    fn render_string_right(&self, monitor_index: usize, texts: &[ColoredText]) {
         let (draw, text_draw, monitor_width) = self.render_handles(monitor_index);
 
         let mut text_width = 0;
@@ -283,9 +272,9 @@ impl Bar {
         let mut cursor_offset = monitor_width - text_width;
         for (ColoredText { text, fg, bg }, width) in texts.iter().zip(text_widths.into_iter()) {
             // Background color.
-            let color_gc = self.get_color(*bg)?;
+            let color_gc = self.get_color(*bg);
             let rect = (draw, color_gc, cursor_offset, 0, width, self.height);
-            self.setup.fill_rects(&[rect])?;
+            self.setup.fill_rects(&[rect]);
 
             // Foreground text.
             let fg = self.xft.create_color(*fg);
@@ -299,8 +288,6 @@ impl Bar {
             );
             cursor_offset += width;
         }
-
-        Ok(())
     }
 
     pub fn render_string(
@@ -308,15 +295,15 @@ impl Bar {
         monitor_index: usize,
         alignment: Alignment,
         texts: &[ColoredText],
-    ) -> Result<(), Error> {
-        self.cache_colors(monitor_index, texts)?;
+    ) {
+        self.cache_colors(monitor_index, texts);
         match alignment {
             Alignment::Left => self.render_string_left(monitor_index, texts),
             Alignment::Right => self.render_string_right(monitor_index, texts),
         }
     }
 
-    pub fn blit(&self) -> Result<(), Error> {
+    pub fn blit(&self) {
         self.setup.copy_areas(
             &self
                 .monitors
@@ -331,10 +318,16 @@ impl Bar {
                     )
                 })
                 .collect::<Vec<_>>(),
-        )
+        );
     }
 
-    pub fn flush(&self) -> Result<(), Error> {
-        self.setup.flush()
+    pub fn flush(&self) {
+        self.setup.flush();
+    }
+}
+
+impl Default for Bar {
+    fn default() -> Self {
+        Self::new()
     }
 }

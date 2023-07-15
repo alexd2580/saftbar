@@ -1,16 +1,13 @@
-use saftbar::{
-    bar::{Alignment, Bar, ColoredText},
-    error::Error,
-};
+use saftbar::bar::{Alignment, Bar, ColoredText};
 
-fn render(bar: &mut Bar) -> Result<(), Error> {
+fn render(bar: &mut Bar) {
     let red = (255, 0, 0, 255);
     let blue = (0, 0, 255, 255);
     let black = (0, 0, 0, 255);
     let white = (255, 255, 255, 255);
     let green = (0, 255, 0, 255);
 
-    bar.clear_monitors()?;
+    bar.clear_monitors();
     bar.render_string(
         0,
         Alignment::Left,
@@ -36,7 +33,7 @@ fn render(bar: &mut Bar) -> Result<(), Error> {
                 bg: blue,
             },
         ],
-    )?;
+    );
 
     bar.render_string(
         0,
@@ -53,7 +50,7 @@ fn render(bar: &mut Bar) -> Result<(), Error> {
                 bg: black,
             },
         ],
-    )?;
+    );
 
     bar.render_string(
         1,
@@ -85,7 +82,7 @@ fn render(bar: &mut Bar) -> Result<(), Error> {
                 bg: green,
             },
         ],
-    )?;
+    );
 
     bar.render_string(
         1,
@@ -102,15 +99,13 @@ fn render(bar: &mut Bar) -> Result<(), Error> {
                 bg: white,
             },
         ],
-    )?;
-
-    Ok(())
+    );
 }
 
 fn main() {
-    let mut bar = Bar::new().unwrap();
-    render(&mut bar).unwrap();
-    bar.blit().unwrap();
-    bar.flush().unwrap();
+    let mut bar = Bar::new();
+    render(&mut bar);
+    bar.blit();
+    bar.flush();
     std::thread::sleep(std::time::Duration::from_secs(10));
 }

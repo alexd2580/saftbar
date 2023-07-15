@@ -6,8 +6,14 @@ pub type RGBA = (u8, u8, u8, u8);
 
 /// Smart object for serverside allocated `XftColor`s.
 pub struct Color {
+    /// Xft color object. Used as a pointer, therefore the object itself is never accessed.
+    #[allow(dead_code)]
     color: Box<xft::XftColor>,
+
+    /// Pointer to the color object. This is a cached value for convenience.
     color_ptr: *mut xft::XftColor,
+
+    /// Render reference resources.
     display: *mut xlib::Display,
     visual: *mut xlib::Visual,
     colormap_id: u64,
@@ -23,7 +29,9 @@ impl Drop for Color {
 #[derive(Debug)]
 pub struct Font {
     font: *mut xft::XftFont,
+    height: u32,
     ascent: u32,
+    #[allow(dead_code)]
     descent: u32,
     display: *mut xlib::Display,
 }
@@ -31,6 +39,13 @@ pub struct Font {
 impl Drop for Font {
     fn drop(&mut self) {
         unsafe { xft::XftFontClose(self.display, self.font) };
+    }
+}
+
+impl Font {
+    #[must_use]
+    pub fn height(&self) -> u32 {
+        self.height
     }
 }
 
@@ -62,6 +77,10 @@ impl Xft {
     }
 
     /// Create a color object, wrap it into a smart object and store.
+    ///
+    /// # Panics
+    ///
+    /// This function expects `XftColorAllocValue` to not fail.
     #[must_use]
     pub fn create_color(&self, rgba: RGBA) -> Color {
         let mut render_color = xrender::XRenderColor {
@@ -94,7 +113,7 @@ impl Xft {
                 std::ptr::addr_of_mut!(color),
             )
         };
-        assert_ne!(result, 0, "Failed to create Xft color");
+        assert_ne!(result, 0, "Xft color creation failed");
 
         let mut color = Box::new(color);
         let color_ptr = std::ptr::addr_of_mut!(*color.deref_mut());
@@ -109,26 +128,40 @@ impl Xft {
 
     /// Load a font by pattern, wrap it into a smart object and store.
     /// Trailing 0 required for `font_pattern`!
-    pub fn create_font(&mut self, font_pattern: &str) -> Font {
+    ///
+    /// # Panics
+    ///
+    /// This function expects `XftFontLoad` to not fail and the loaded font to have sensible
+    /// values, especially positive ascent and descent.
+    pub fn create_font(&mut self, font_family: &str, pixel_size: u32) -> Font {
         let display = self.display;
+        let font_pattern =
+            format!("{font_family}:pixelsize={pixel_size}:antialias=true:hinting=true\0");
         let pattern_ptr = font_pattern.as_ptr().cast::<i8>();
         let font = unsafe { xft::XftFontOpenName(display, 0, pattern_ptr) };
-        let (ascent, descent) = unsafe {
-            (
-                (*font).ascent.try_into().unwrap(),
-                (*font).descent.try_into().unwrap(),
-            )
-        };
-        assert!(!font.is_null(), "Failed to create Xft font");
+        assert!(!font.is_null(), "Xft font creation failed");
+        let x_font = &unsafe { *font };
+        dbg!(&unsafe { *font });
+        let (height, ascent, descent) = (
+            x_font.height.try_into().expect("Font height is negative"),
+            x_font.ascent.try_into().expect("Font ascent is negative"),
+            x_font.descent.try_into().expect("Font descent is negative"),
+        );
 
         Font {
             font,
+            height,
             ascent,
             descent,
             display,
         }
     }
 
+    /// Create a `Draw` - a temporary object holding references to the drawable and the context.
+    ///
+    /// # Panics
+    ///
+    /// This function expects `XftDrawCreate` to not fail.
     #[must_use]
     pub fn new_draw(&self, pixmap_id: u64) -> Draw {
         let draw =
@@ -138,10 +171,16 @@ impl Xft {
         Draw { draw }
     }
 
+    fn c_text_ptr_len(text: &str) -> (*const u8, i32) {
+        (
+            text.as_ptr(),
+            text.len().try_into().expect("Text is longer than i16::MAX"),
+        )
+    }
+
     #[must_use]
     pub fn string_cursor_offset(&self, text: &str, font: &Font) -> u32 {
-        let text_ptr = text.as_ptr();
-        let text_len = i32::try_from(text.len()).unwrap();
+        let (text_ptr, text_len) = Self::c_text_ptr_len(text);
         let mut extents = xrender::XGlyphInfo {
             width: 0,
             height: 0,
@@ -153,7 +192,10 @@ impl Xft {
         unsafe {
             let extents_ptr = std::ptr::addr_of_mut!(extents);
             xft::XftTextExtentsUtf8(self.display, font.font, text_ptr, text_len, extents_ptr);
-            extents.xOff.try_into().unwrap()
+            extents
+                .xOff
+                .try_into()
+                .expect("Cursor offset is (probably) a negative value")
         }
     }
 
@@ -166,16 +208,19 @@ impl Xft {
         canvas_height: u32,
         cursor_offset: u32,
     ) {
-        let text_ptr = text.as_ptr();
-        let text_len = i32::try_from(text.len()).unwrap();
-        let baseline_offset = (canvas_height + font.ascent - font.descent) / 2;
+        let (text_ptr, text_len) = Self::c_text_ptr_len(text);
+        let baseline_offset = (canvas_height - font.height) / 2 + font.ascent;
         unsafe {
             xft::XftDrawStringUtf8(
                 draw.draw,
                 color.color_ptr,
                 font.font,
-                cursor_offset.try_into().unwrap(),
-                baseline_offset.try_into().unwrap(),
+                cursor_offset
+                    .try_into()
+                    .expect("Cursor offset not representable as c_int"),
+                baseline_offset
+                    .try_into()
+                    .expect("Baseline offset not representable as c_int"),
                 text_ptr,
                 text_len,
             );
