@@ -29,7 +29,6 @@ impl Drop for Color {
 #[derive(Debug)]
 pub struct Font {
     font: *mut xft::XftFont,
-    height: u32,
     ascent: u32,
     #[allow(dead_code)]
     descent: u32,
@@ -44,8 +43,8 @@ impl Drop for Font {
 
 impl Font {
     #[must_use]
-    pub fn height(&self) -> u32 {
-        self.height
+    pub fn asc_and_desc(&self) -> u32 {
+        self.ascent + self.descent
     }
 }
 
@@ -129,28 +128,36 @@ impl Xft {
     /// Load a font by pattern, wrap it into a smart object and store.
     /// Trailing 0 required for `font_pattern`!
     ///
+    /// # Sizes
+    ///
+    /// It is ESSENTIAL to choose the right font size. Note that `size` is a double. This is not a
+    /// mistake. This is by design. Fonts are rasterized around a baseline. When specifying a pixel
+    /// size you are specifying the non-grid-aligned vertical height of a font, not its actual
+    /// pixel height, which will most likely be one pixel more than the specified height.
+    ///
+    /// Try out different fractional heights until you find a symmetric one for the font that you
+    /// want to use.
+    ///
     /// # Panics
     ///
     /// This function expects `XftFontLoad` to not fail and the loaded font to have sensible
     /// values, especially positive ascent and descent.
-    pub fn create_font(&mut self, font_family: &str, pixel_size: u32) -> Font {
+    pub fn create_font(&mut self, font_family: &str, size: f32) -> Font {
         let display = self.display;
-        let font_pattern =
-            format!("{font_family}:pixelsize={pixel_size}:antialias=true:hinting=true\0");
+        let font_pattern = format!(
+            "{font_family}:size={size:.5}:antialias=true:hinting=true:hintstyle=hintnone\0"
+        );
         let pattern_ptr = font_pattern.as_ptr().cast::<i8>();
         let font = unsafe { xft::XftFontOpenName(display, 0, pattern_ptr) };
         assert!(!font.is_null(), "Xft font creation failed");
         let x_font = &unsafe { *font };
-        dbg!(&unsafe { *font });
-        let (height, ascent, descent) = (
-            x_font.height.try_into().expect("Font height is negative"),
+        let (ascent, descent) = (
             x_font.ascent.try_into().expect("Font ascent is negative"),
             x_font.descent.try_into().expect("Font descent is negative"),
         );
 
         Font {
             font,
-            height,
             ascent,
             descent,
             display,
@@ -209,7 +216,15 @@ impl Xft {
         cursor_offset: u32,
     ) {
         let (text_ptr, text_len) = Self::c_text_ptr_len(text);
-        let baseline_offset = (canvas_height - font.height) / 2 + font.ascent;
+        // WTF... if was right here all the time. If my canvas has the same size as the font then i
+        // don't need no centering stuff, the ascent IS the baseline offset.
+        // The major problem is choosing a font size so that its (!) rasterization is vertically
+        // symmetric! See screenshot for reference.
+        // let baseline_offset = font.ascent;
+
+        // If the canvas is larger than asc+desc then we hope that the overhang is an even number
+        // of pixels. Otherwise we're off by 0.5 pixels.
+        let baseline_offset = (canvas_height - font.asc_and_desc()) / 2 + font.ascent;
         unsafe {
             xft::XftDrawStringUtf8(
                 draw.draw,

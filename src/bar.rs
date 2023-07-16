@@ -68,20 +68,13 @@ impl Bar {
             .collect::<Vec<_>>();
         valid_regions.sort_by(compare_rectangles);
 
-        // Load the font first. Fonts suck and you can't really tell how large a font is before
-        // loading it because fonts suck. You can't even force a font to be a specific size because
-        // fonts suck. E.g. `fontforge`. Compare UbuntuMono and FiraCode. UbuntuMono is just about
-        // the right size BUT ALWAYS ONE PIXEL OFF, FiraCode is ALL OVER THE PLACE! Fonts suck.
-
         let mut xft = setup.create_xft();
 
-        // This is the ~only~ font that works more or less the way i want it to.
-        // Use the `Propo` variant to get full size icons, while sacrificing monospace, which is
-        // not needed anyway.
+        // Use the `Propo` variant to get full size icons, while sacrificing monospace.
         let font_family = "Ubuntu Mono Nerd Font Propo";
-        let font = xft.create_font(font_family, 20);
+        let font = xft.create_font(font_family, 15.25);
 
-        let height = font.height();
+        let height = font.asc_and_desc();
         let monitors = valid_regions
             .into_iter()
             .map(|Rectangle { x, y, w, .. }| {
