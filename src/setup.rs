@@ -277,7 +277,7 @@ impl Setup {
         atom_names
             .map(|name| {
                 let request = x::InternAtom {
-                    only_if_exists: true,
+                    only_if_exists: false,
                     name: name.as_bytes(),
                 };
                 (name, conn.send_request(&request))

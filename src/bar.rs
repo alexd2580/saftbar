@@ -98,7 +98,7 @@ impl Bar {
             use PropertyData::{Atom, Cardinal, String};
 
             // Create atoms.
-            let [desktop, window_type, window_type_dock, state, state_sticky, strut, strut_partial] =
+            let [desktop, window_type, window_type_dock, state, state_sticky, strut_partial, strut] =
                 setup.get_atoms(&[
                     "_NET_WM_DESKTOP",
                     "_NET_WM_WINDOW_TYPE",
@@ -129,8 +129,8 @@ impl Bar {
                 let ex = sx + monitor.w;
                 let strut_data = [0, 0, h, 0, 0, 0, 0, 0, sx, ex, 0, 0];
                 let monitor_properties = [
-                    ChangeProperty(strut, Cardinal(&strut_data[..4])),
                     ChangeProperty(strut_partial, Cardinal(&strut_data)),
+                    ChangeProperty(strut, Cardinal(&strut_data[..4])),
                 ];
                 setup.replace_properties(monitor.window, &monitor_properties);
             }
