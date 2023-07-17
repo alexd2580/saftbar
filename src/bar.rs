@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use xcb::{x, Xid};
 
-use crate::setup::{compare_rectangles, PropertyData, Rectangle, Setup};
+use crate::setup::{
+    compare_rectangles, ChangeProperty, CopyArea, FillRect, PropertyData, Rectangle, Setup,
+};
 use crate::xft::{Draw, Font, Xft, RGBA};
 
 struct Monitor {
@@ -111,11 +113,11 @@ impl Bar {
             let state_sticky = [state_sticky];
             let name_bytes = "saftbar".as_bytes();
             let properties = [
-                (desktop, Cardinal(&[u32::MAX])),
-                (window_type, Atom(&window_type_dock)),
-                (state, Atom(&state_sticky)),
-                (x::ATOM_WM_NAME, String(name_bytes)),
-                (x::ATOM_WM_CLASS, String(name_bytes)),
+                ChangeProperty(desktop, Cardinal(&[u32::MAX])),
+                ChangeProperty(window_type, Atom(&window_type_dock)),
+                ChangeProperty(state, Atom(&state_sticky)),
+                ChangeProperty(x::ATOM_WM_NAME, String(name_bytes)),
+                ChangeProperty(x::ATOM_WM_CLASS, String(name_bytes)),
             ];
 
             // Set window properties.
@@ -127,8 +129,8 @@ impl Bar {
                 let ex = sx + monitor.w;
                 let strut_data = [0, 0, h, 0, 0, 0, 0, 0, sx, ex, 0, 0];
                 let monitor_properties = [
-                    (strut, Cardinal(&strut_data[..4])),
-                    (strut_partial, Cardinal(&strut_data)),
+                    ChangeProperty(strut, Cardinal(&strut_data[..4])),
+                    ChangeProperty(strut_partial, Cardinal(&strut_data)),
                 ];
                 setup.replace_properties(monitor.window, &monitor_properties);
             }
@@ -142,7 +144,7 @@ impl Bar {
         setup.map_windows(
             &monitors
                 .iter()
-                .map(|monitor| monitor.window)
+                .map(|monitor| crate::setup::MapWindow(monitor.window))
                 .collect::<Vec<_>>(),
         );
 
@@ -192,7 +194,7 @@ impl Bar {
                 .monitors
                 .iter()
                 .map(|monitor| {
-                    (
+                    FillRect(
                         x::Drawable::Pixmap(monitor.pixmap),
                         self.clear_gc,
                         0,
@@ -232,7 +234,7 @@ impl Bar {
 
             // Background color.
             let color_gc = self.get_color(*bg);
-            let rect = (draw, color_gc, cursor_offset, 0, width, self.height);
+            let rect = FillRect(draw, color_gc, cursor_offset, 0, width, self.height);
             self.setup.fill_rects(&[rect]);
 
             // Foreground text.
@@ -266,7 +268,7 @@ impl Bar {
         for (ColoredText { text, fg, bg }, width) in texts.iter().zip(text_widths.into_iter()) {
             // Background color.
             let color_gc = self.get_color(*bg);
-            let rect = (draw, color_gc, cursor_offset, 0, width, self.height);
+            let rect = FillRect(draw, color_gc, cursor_offset, 0, width, self.height);
             self.setup.fill_rects(&[rect]);
 
             // Foreground text.
@@ -302,7 +304,7 @@ impl Bar {
                 .monitors
                 .iter()
                 .map(|monitor| {
-                    (
+                    CopyArea(
                         monitor.pixmap,
                         monitor.window,
                         self.clear_gc,

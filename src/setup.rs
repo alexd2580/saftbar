@@ -44,17 +44,39 @@ pub fn compare_rectangles(a: &Rectangle, b: &Rectangle) -> Ordering {
     }
 }
 
-// Type alias used for specifying a rect fill request.
-type RectSpec = (x::Drawable, x::Gcontext, u32, u32, u32, u32);
-//
-// Type alias used for specifying an area copy request.
-type AreaSpec = (x::Pixmap, x::Window, x::Gcontext, u32, u32);
-
+#[derive(Debug)]
 pub enum PropertyData<'a> {
     Cardinal(&'a [u32]),
     Atom(&'a [x::Atom]),
     String(&'a [u8]),
 }
+
+// The following are structs holding the data for a pipelined version of the respective request.
+
+#[derive(Debug)]
+pub struct ChangeProperty<'a>(pub x::Atom, pub PropertyData<'a>);
+
+#[derive(Debug)]
+pub struct MapWindow(pub x::Window);
+
+#[derive(Debug)]
+pub struct FillRect(
+    pub x::Drawable,
+    pub x::Gcontext,
+    pub u32,
+    pub u32,
+    pub u32,
+    pub u32,
+);
+
+#[derive(Debug)]
+pub struct CopyArea(
+    pub x::Pixmap,
+    pub x::Window,
+    pub x::Gcontext,
+    pub u32,
+    pub u32,
+);
 
 pub struct Setup {
     // width: u32,
@@ -183,16 +205,21 @@ impl Setup {
     ///
     /// TODO:
     /// Maybe redefine this function to work with anything iterator-able?
-    fn pipeline_requests<T>(
+    fn pipeline_requests<T: std::fmt::Debug>(
         &self,
         data: &[T],
         send_request: impl Fn(&T) -> xcb::VoidCookieChecked,
-    ) -> Result<(), xcb::ProtocolError> {
+    ) {
         data.iter()
             .map(send_request)
             .collect::<Vec<_>>()
             .into_iter()
-            .try_for_each(|cookie| self.connection.check_request(cookie))
+            .zip(data.iter())
+            .for_each(|(cookie, data)| {
+                if let Err(err) = self.connection.check_request(cookie) {
+                    panic!("Request failed: {data:?}; {err}");
+                }
+            });
     }
 
     pub fn create_window_and_pixmap(
@@ -262,44 +289,45 @@ impl Setup {
             })
     }
 
-    pub fn replace_properties(&self, window: x::Window, properties: &[(x::Atom, PropertyData)]) {
+    pub fn replace_properties(&self, window: x::Window, properties: &[ChangeProperty]) {
         use PropertyData::{Atom, Cardinal, String};
 
         let conn = &self.connection;
         let mode = x::PropMode::Replace;
-        self.pipeline_requests(properties, |&(property, ref data)| match data {
-            Cardinal(data) => conn.send_request_checked(&x::ChangeProperty {
-                mode,
-                window,
-                property,
-                r#type: x::ATOM_CARDINAL,
-                data,
-            }),
-            Atom(data) => conn.send_request_checked(&x::ChangeProperty {
-                mode,
-                window,
-                property,
-                r#type: x::ATOM_ATOM,
-                data,
-            }),
-            String(data) => conn.send_request_checked(&x::ChangeProperty {
-                mode,
-                window,
-                property,
-                r#type: x::ATOM_STRING,
-                data,
-            }),
-        })
-        .expect("Failed to replace window properties");
+        self.pipeline_requests(
+            properties,
+            |&ChangeProperty(property, ref data)| match data {
+                Cardinal(data) => conn.send_request_checked(&x::ChangeProperty {
+                    mode,
+                    window,
+                    property,
+                    r#type: x::ATOM_CARDINAL,
+                    data,
+                }),
+                Atom(data) => conn.send_request_checked(&x::ChangeProperty {
+                    mode,
+                    window,
+                    property,
+                    r#type: x::ATOM_ATOM,
+                    data,
+                }),
+                String(data) => conn.send_request_checked(&x::ChangeProperty {
+                    mode,
+                    window,
+                    property,
+                    r#type: x::ATOM_STRING,
+                    data,
+                }),
+            },
+        );
     }
 
     /// Display windows.
-    pub fn map_windows(&self, windows: &[x::Window]) {
-        self.pipeline_requests(windows, |&window| {
+    pub fn map_windows(&self, windows: &[MapWindow]) {
+        self.pipeline_requests(windows, |&MapWindow(window)| {
             self.connection
                 .send_request_checked(&x::MapWindow { window })
-        })
-        .expect("Failed to map windows");
+        });
     }
 
     pub fn create_gc(&self, drawable: x::Drawable, value_list: &[x::Gc]) -> x::Gcontext {
@@ -322,8 +350,8 @@ impl Setup {
         )
     }
 
-    pub fn fill_rects(&self, rects: &[RectSpec]) {
-        self.pipeline_requests(rects, |&(drawable, gc, x, y, w, h): &RectSpec| {
+    pub fn fill_rects(&self, rects: &[FillRect]) {
+        self.pipeline_requests(rects, |&FillRect(drawable, gc, x, y, w, h)| {
             self.connection.send_request_checked(&x::PolyFillRectangle {
                 drawable,
                 gc,
@@ -334,12 +362,11 @@ impl Setup {
                     height: h.try_into().unwrap(),
                 }],
             })
-        })
-        .expect("Failed to fill rectangles");
+        });
     }
 
-    pub fn copy_areas(&self, areas: &[AreaSpec]) {
-        self.pipeline_requests(areas, |&(pixmap, window, gc, w, h): &AreaSpec| {
+    pub fn copy_areas(&self, areas: &[CopyArea]) {
+        self.pipeline_requests(areas, |&CopyArea(pixmap, window, gc, w, h)| {
             self.connection.send_request_checked(&x::CopyArea {
                 src_drawable: x::Drawable::Pixmap(pixmap),
                 dst_drawable: x::Drawable::Window(window),
@@ -351,8 +378,7 @@ impl Setup {
                 width: w.try_into().unwrap(),
                 height: h.try_into().unwrap(),
             })
-        })
-        .expect("Failed to fill rectangles");
+        });
     }
 
     pub fn flush(&self) {
