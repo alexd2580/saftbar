@@ -1,3 +1,4 @@
+use std::os::fd::{AsRawFd, RawFd};
 use std::{cmp::Ordering, ptr::null_mut};
 
 use crate::connection::Connection;
@@ -157,6 +158,16 @@ impl Setup {
             root_window,
             connection,
         }
+    }
+
+    pub fn poll_for_event(&self) -> Option<xcb::Event> {
+        self.connection
+            .poll_for_event()
+            .expect("Failed to poll for event")
+    }
+
+    pub fn raw_connection_fd(&self) -> RawFd {
+        self.connection.as_raw_fd()
     }
 
     pub fn get_screen_resources(&self) -> randr::GetScreenResourcesCurrentReply {

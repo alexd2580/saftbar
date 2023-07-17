@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use tokio::io::unix::AsyncFd;
 use xcb::{x, Xid};
 
 use crate::setup::{
@@ -318,6 +319,23 @@ impl Bar {
 
     pub fn flush(&self) {
         self.setup.flush();
+    }
+
+    pub async fn next_x_event(&self) -> xcb::Event {
+        loop {
+            if let Some(event) = self.setup.poll_for_event() {
+                return event;
+            }
+
+            let async_fd = AsyncFd::new(self.setup.raw_connection_fd())
+                .expect("Failed to initialize async fd");
+            // Drop the guard immediately. We are only interested in noticing action on the
+            // file descriptor.
+            let _ = async_fd
+                .readable()
+                .await
+                .expect("Failed to wait for events");
+        }
     }
 }
 
