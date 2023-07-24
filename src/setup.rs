@@ -4,10 +4,11 @@ use std::{cmp::Ordering, ptr::null_mut};
 use crate::connection::Connection;
 use crate::xft::Xft;
 
+use log::debug;
 use xcb::Xid;
 use xcb::{randr, x};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Rectangle {
     pub x: u32,
     pub y: u32,
@@ -201,6 +202,38 @@ impl Setup {
                 })
                 .expect("Failed to get crtc info")
         })
+    }
+
+    pub fn query_valid_crtc_regions(&self) -> Vec<Rectangle> {
+        debug!("Retrieving screen resources");
+        let screen_resources = self.get_screen_resources();
+        let outputs = screen_resources.outputs();
+
+        // Get output regions.
+        debug!("Retrieving regions for {} outputs", outputs.len());
+        let mut regions = Vec::new();
+        for output in outputs {
+            if let Some(crtc_info) = self.get_crtc_info(*output) {
+                regions.push(Rectangle::from(&crtc_info));
+            }
+        }
+
+        // Filter and sort crtc regions.
+        let mut valid_regions = regions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, rect)| {
+                regions
+                    .iter()
+                    .enumerate()
+                    .all(|(index_other, other)| index == index_other || !rect.is_inside(other))
+                    .then_some(rect.clone())
+            })
+            .collect::<Vec<_>>();
+        valid_regions.sort_by(compare_rectangles);
+        debug!("Filtered valid regions:\n{valid_regions:#?}");
+
+        valid_regions
     }
 
     /// Send and await multiple void requests in parallel.

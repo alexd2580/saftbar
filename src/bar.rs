@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
+use log::debug;
 use tokio::io::unix::AsyncFd;
 use xcb::{x, Xid};
 
-use crate::setup::{
-    compare_rectangles, ChangeProperty, CopyArea, FillRect, PropertyData, Rectangle, Setup,
-};
+use crate::setup::{ChangeProperty, CopyArea, FillRect, PropertyData, Rectangle, Setup};
 use crate::xft::{Draw, Font, Xft, RGBA};
 
 struct Monitor {
@@ -45,38 +44,15 @@ pub struct Bar {
 impl Bar {
     pub fn new() -> Self {
         let setup = Setup::new();
-
-        let screen_resources = setup.get_screen_resources();
-        let outputs = screen_resources.outputs();
-
-        // Get output regions.
-        let mut regions = Vec::new();
-        for output in outputs {
-            if let Some(crtc_info) = setup.get_crtc_info(*output) {
-                regions.push(Rectangle::from(&crtc_info));
-            }
-        }
-
-        // Filter and sort crtc regions.
-        let mut valid_regions = regions
-            .iter()
-            .enumerate()
-            .filter_map(|(index, rect)| {
-                regions
-                    .iter()
-                    .enumerate()
-                    .all(|(index_other, other)| index == index_other || !rect.is_inside(other))
-                    .then_some(rect.clone())
-            })
-            .collect::<Vec<_>>();
-        valid_regions.sort_by(compare_rectangles);
-
+        let valid_regions = setup.query_valid_crtc_regions();
         let mut xft = setup.create_xft();
 
         // Use the `Propo` variant to get full size icons, while sacrificing monospace.
         let font_family = "Ubuntu Mono Nerd Font Propo";
         let font = xft.create_font(font_family, 15.25);
+        debug!("Loaded font: {font:#?}");
 
+        debug!("Creating windows");
         let height = font.asc_and_desc();
         let monitors = valid_regions
             .into_iter()
@@ -95,6 +71,7 @@ impl Bar {
             .collect::<Vec<_>>();
 
         // Set EWMH or something values.
+        debug!("Setting EWMH or something atoms");
         {
             use PropertyData::{Atom, Cardinal, String};
 
@@ -142,6 +119,7 @@ impl Bar {
         let clear_gc = setup.create_gc(reference_drawable, &[x::Gc::Foreground(0x0000_0000)]);
 
         // Make windows visible.
+        debug!("Mapping windows");
         setup.map_windows(
             &monitors
                 .iter()
@@ -150,6 +128,7 @@ impl Bar {
         );
 
         setup.flush();
+        debug!("Bar initialization done");
 
         // TODO handle signals.
         // TODO Use execution path: arg0.
