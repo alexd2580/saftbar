@@ -186,7 +186,7 @@ impl Xft {
     }
 
     #[must_use]
-    pub fn string_cursor_offset(&self, text: &str, font: &Font) -> u32 {
+    pub fn cursor_offset(&self, text: &str, font: &Font) -> u32 {
         let (text_ptr, text_len) = Self::c_text_ptr_len(text);
         let mut extents = xrender::XGlyphInfo {
             width: 0,

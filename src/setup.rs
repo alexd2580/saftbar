@@ -72,6 +72,9 @@ pub struct FillRect(
 );
 
 #[derive(Debug)]
+pub struct FillPoly(pub x::Drawable, pub x::Gcontext, pub Vec<(u32, u32)>);
+
+#[derive(Debug)]
 pub struct CopyArea(
     pub x::Pixmap,
     pub x::Window,
@@ -405,6 +408,24 @@ impl Setup {
                     width: w.try_into().unwrap(),
                     height: h.try_into().unwrap(),
                 }],
+            })
+        });
+    }
+
+    pub fn fill_polys(&self, polys: &[FillPoly]) {
+        self.pipeline_requests(polys, |&FillPoly(drawable, gc, ref points)| {
+            self.connection.send_request_checked(&x::FillPoly {
+                drawable,
+                gc,
+                shape: x::PolyShape::Convex,
+                coordinate_mode: x::CoordMode::Origin,
+                points: &points
+                    .iter()
+                    .map(|(x, y)| x::Point {
+                        x: (*x).try_into().unwrap(),
+                        y: (*y).try_into().unwrap(),
+                    })
+                    .collect::<Vec<_>>(),
             })
         });
     }

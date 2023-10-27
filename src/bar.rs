@@ -4,7 +4,7 @@ use log::debug;
 use tokio::io::unix::AsyncFd;
 use xcb::{x, Xid};
 
-use crate::setup::{ChangeProperty, CopyArea, FillRect, PropertyData, Rectangle, Setup};
+use crate::setup::{ChangeProperty, CopyArea, FillPoly, FillRect, PropertyData, Rectangle, Setup};
 use crate::xft::{Draw, Font, Xft, RGBA};
 
 struct Monitor {
@@ -23,10 +23,29 @@ pub enum Alignment {
     Right,
 }
 
-pub struct ColoredText {
-    pub text: String,
+#[derive(Clone, Copy)]
+pub enum PowerlineStyle {
+    Powerline,
+    Rounded,
+}
+
+#[derive(Clone, Copy)]
+pub enum PowerlineDirection {
+    Left,
+    Right,
+}
+
+#[derive(Clone)]
+pub enum ContentShape {
+    Text(String),
+    Powerline(PowerlineStyle, PowerlineDirection),
+}
+
+#[derive(Clone)]
+pub struct ContentItem {
     pub fg: RGBA,
     pub bg: RGBA,
+    pub shape: ContentShape,
 }
 
 pub struct Bar {
@@ -116,7 +135,7 @@ impl Bar {
 
         // This is needed to get the root/depth. The root window has 24bpp, we want 32. Why?
         let reference_drawable = x::Drawable::Window(monitors[0].window);
-        let clear_gc = setup.create_gc(reference_drawable, &[x::Gc::Foreground(0x0000_0000)]);
+        let clear_gc = setup.create_gc(reference_drawable, &[x::Gc::Foreground(0xFF00_0000)]);
 
         // Make windows visible.
         debug!("Mapping windows");
@@ -187,7 +206,7 @@ impl Bar {
         );
     }
 
-    fn cache_colors(&mut self, monitor_index: usize, texts: &[ColoredText]) {
+    fn cache_colors(&mut self, monitor_index: usize, texts: &[ContentItem]) {
         let pixmap = self.monitors[monitor_index].pixmap;
         let drawable = x::Drawable::Pixmap(pixmap);
         for text in texts {
@@ -205,80 +224,85 @@ impl Bar {
         )
     }
 
-    fn render_string_left(&self, monitor_index: usize, texts: &[ColoredText]) {
-        let (draw, text_draw, _) = self.render_handles(monitor_index);
-
-        let mut cursor_offset = 0;
-        for ColoredText { text, fg, bg } in texts {
-            let width = self.xft.string_cursor_offset(text, &self.font);
-
-            // Background color.
-            let color_gc = self.get_color(*bg);
-            let rect = FillRect(draw, color_gc, cursor_offset, 0, width, self.height);
-            self.setup.fill_rects(&[rect]);
-
-            // Foreground text.
-            let fg = self.xft.create_color(*fg);
-            self.xft.draw_string(
-                text,
-                &text_draw,
-                &fg,
-                &self.font,
-                self.height,
-                cursor_offset,
-            );
-            cursor_offset += width;
+    fn cursor_offset(&self, item: &ContentItem) -> u32 {
+        match item.shape {
+            ContentShape::Text(ref text) => self.xft.cursor_offset(&text, &self.font),
+            ContentShape::Powerline(_, _) => (self.height - 1) / 2,
         }
     }
 
-    fn render_string_right(&self, monitor_index: usize, texts: &[ColoredText]) {
-        let (draw, text_draw, monitor_width) = self.render_handles(monitor_index);
+    pub fn draw(&mut self, monitor_index: usize, alignment: Alignment, items: &[ContentItem]) {
+        self.cache_colors(monitor_index, items);
 
-        let mut text_width = 0;
-        let text_widths = texts
+        let item_widths = items
             .iter()
-            .map(|text| {
-                let cursor_offset = self.xft.string_cursor_offset(&text.text, &self.font);
-                text_width += cursor_offset;
-                cursor_offset
-            })
+            .map(|item| self.cursor_offset(item))
             .collect::<Vec<_>>();
 
-        let mut cursor_offset = monitor_width - text_width;
-        for (ColoredText { text, fg, bg }, width) in texts.iter().zip(text_widths.into_iter()) {
+        let (draw, text_draw, monitor_width) = self.render_handles(monitor_index);
+
+        // Where i start rendering depends on the alignment and the width of the content.
+        let mut cursor_offset = match alignment {
+            Alignment::Left => 0,
+            Alignment::Right => monitor_width - item_widths.iter().sum::<u32>(),
+        };
+
+        for (ContentItem { fg, bg, shape }, width) in items.iter().zip(item_widths.into_iter()) {
             // Background color.
             let color_gc = self.get_color(*bg);
             let rect = FillRect(draw, color_gc, cursor_offset, 0, width, self.height);
             self.setup.fill_rects(&[rect]);
 
-            // Foreground text.
-            let fg = self.xft.create_color(*fg);
-            self.xft.draw_string(
-                text,
-                &text_draw,
-                &fg,
-                &self.font,
-                self.height,
-                cursor_offset,
-            );
+            match shape {
+                ContentShape::Text(text) => {
+                    // Foreground text.
+                    let fg = self.xft.create_color(*fg);
+                    self.xft.draw_string(
+                        text,
+                        &text_draw,
+                        &fg,
+                        &self.font,
+                        self.height,
+                        cursor_offset,
+                    );
+                }
+                ContentShape::Powerline(style, direction) => {
+                    let color_gc = self.get_color(*fg);
+
+                    // Consult a pixel editor for this.
+                    // We want to use truncating division for odd numbers and get one less than the
+                    // half for even numbers. Exactly half would point to the first line in the
+                    // second half of the row.
+                    let h = (self.height - 1) / 2;
+
+                    let x_l = cursor_offset;
+                    let x_r = x_l + h;
+                    let y_t = 0;
+                    let y_b = self.height - 1;
+                    // Split the midpoint into two, so that we have exactly 45 deg angles for both
+                    // odd and even vertical sizes.
+                    let y_um = y_t + h;
+                    let y_lm = y_b - h;
+
+                    let points = match direction {
+                        PowerlineDirection::Right => {
+                            vec![(x_l, y_t), (x_l, y_b), (x_r, y_lm), (x_r, y_um)]
+                        }
+                        PowerlineDirection::Left => {
+                            vec![(x_l, y_um), (x_l, y_lm), (x_r, y_b), (x_r, y_t)]
+                        }
+                    };
+                    dbg!(&points);
+                    let poly = FillPoly(draw, color_gc, points);
+                    self.setup.fill_polys(&[poly]);
+                }
+            }
+
             cursor_offset += width;
         }
     }
 
-    pub fn render_string(
-        &mut self,
-        monitor_index: usize,
-        alignment: Alignment,
-        texts: &[ColoredText],
-    ) {
-        self.cache_colors(monitor_index, texts);
-        match alignment {
-            Alignment::Left => self.render_string_left(monitor_index, texts),
-            Alignment::Right => self.render_string_right(monitor_index, texts),
-        }
-    }
-
-    pub fn blit(&self) {
+    pub fn present(&self) {
         self.setup.copy_areas(
             &self
                 .monitors

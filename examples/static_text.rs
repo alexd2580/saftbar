@@ -1,4 +1,4 @@
-use saftbar::bar::{Alignment, Bar, ColoredText};
+use saftbar::bar::{Alignment, Bar, ContentItem, ContentShape, PowerlineDirection, PowerlineStyle};
 
 fn render(bar: &mut Bar) {
     let red = (255, 0, 0, 255);
@@ -8,95 +8,139 @@ fn render(bar: &mut Bar) {
     let green = (0, 255, 0, 255);
 
     bar.clear_monitors();
-    bar.render_string(
+
+    let shape = ContentShape::Powerline(PowerlineStyle::Powerline, PowerlineDirection::Right);
+    bar.draw(
         0,
         Alignment::Left,
         &[
-            ColoredText {
-                text: "".to_owned(),
-                fg: white,
+            ContentItem {
                 bg: red,
-            },
-            ColoredText {
-                text: "t s g g s y j p g a g         ".to_owned(),
-                fg: red,
-                bg: white,
-            },
-            ColoredText {
-                text: "".to_owned(),
-                fg: white,
-                bg: red,
-            },
-            ColoredText {
-                text: "leftlast1".to_owned(),
                 fg: black,
+                shape: shape.clone(),
+            },
+            ContentItem {
+                bg: red,
+                fg: white,
+                shape: ContentShape::Text(
+                    "t s g g s y j󰌃 p m󰊫 a g         ".to_owned(),
+                ),
+            },
+            ContentItem {
                 bg: blue,
+                fg: red,
+                shape: shape.clone(),
+            },
+            ContentItem {
+                bg: blue,
+                fg: black,
+                shape: ContentShape::Text("leftlast1".to_owned()),
+            },
+            ContentItem {
+                bg: black,
+                fg: blue,
+                shape: shape.clone(),
             },
         ],
     );
 
-    bar.render_string(
+    let shape = ContentShape::Powerline(PowerlineStyle::Powerline, PowerlineDirection::Left);
+    bar.draw(
         0,
         Alignment::Right,
         &[
-            ColoredText {
-                text: "rightfirst1".to_owned(),
-                fg: green,
-                bg: red,
-            },
-            ColoredText {
-                text: "rightlast1".to_owned(),
-                fg: white,
+            ContentItem {
                 bg: black,
+                fg: green,
+                shape: shape.clone(),
+            },
+            ContentItem {
+                bg: green,
+                fg: red,
+                shape: ContentShape::Text("rightfirst".to_owned()),
+            },
+            ContentItem {
+                bg: green,
+                fg: blue,
+                shape: ContentShape::Text("rightlast".to_owned()),
+            },
+            ContentItem {
+                bg: green,
+                fg: black,
+                shape: shape.clone(),
             },
         ],
     );
 
-    bar.render_string(
+    let shape = ContentShape::Powerline(PowerlineStyle::Rounded, PowerlineDirection::Right);
+    bar.draw(
         1,
         Alignment::Left,
         &[
-            ColoredText {
-                text: "tsggsyjpgagOQIWUOEIRJSLKN<VMCXNV".to_owned(),
-                fg: red,
+            ContentItem {
                 bg: white,
+                fg: black,
+                shape: shape.clone(),
             },
-            ColoredText {
-                text: "white black".to_owned(),
-                fg: white,
+            ContentItem {
+                bg: white,
+                fg: black,
+                shape: ContentShape::Text(
+                    "tsggsyj󰌃pm󰊫agOQIWUOEIRJSLKN<VMCXNV".to_owned(),
+                ),
+            },
+            ContentItem {
+                bg: white,
+                fg: blue,
+                shape: ContentShape::Text("blue".to_owned()),
+            },
+            ContentItem {
+                bg: white,
+                fg: green,
+                shape: ContentShape::Text("green".to_owned()),
+            },
+            ContentItem {
+                bg: white,
+                fg: red,
+                shape: ContentShape::Text("red".to_owned()),
+            },
+            ContentItem {
                 bg: black,
-            },
-            ColoredText {
-                text: "white red".to_owned(),
                 fg: white,
-                bg: red,
-            },
-            ColoredText {
-                text: "white blue".to_owned(),
-                fg: white,
-                bg: blue,
-            },
-            ColoredText {
-                text: "white green".to_owned(),
-                fg: white,
-                bg: green,
+                shape: shape.clone(),
             },
         ],
     );
 
-    bar.render_string(
+    let shape = ContentShape::Powerline(PowerlineStyle::Rounded, PowerlineDirection::Left);
+    bar.draw(
         1,
         Alignment::Right,
         &[
-            ColoredText {
-                text: "          ".to_owned(),
+            ContentItem {
+                bg: black,
                 fg: white,
-                bg: red,
+                shape: shape.clone(),
             },
-            ColoredText {
-                text: "".to_owned(),
-                fg: green,
+            ContentItem {
                 bg: white,
+                fg: red,
+                shape: ContentShape::Text("          ".to_owned()),
+            },
+            ContentItem {
+                bg: white,
+                fg: red,
+                shape: shape.clone(),
+            },
+            ContentItem {
+                bg: red,
+                fg: white,
+                shape: ContentShape::Text("".to_owned()),
+            },
+            ContentItem {
+                bg: red,
+                fg: black,
+                shape: shape.clone(),
             },
         ],
     );
@@ -105,7 +149,7 @@ fn render(bar: &mut Bar) {
 fn main() {
     let mut bar = Bar::new();
     render(&mut bar);
-    bar.blit();
+    bar.present();
     bar.flush();
     std::thread::sleep(std::time::Duration::from_secs(10));
 }
