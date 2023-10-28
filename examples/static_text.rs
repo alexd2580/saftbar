@@ -1,4 +1,4 @@
-use saftbar::bar::{Alignment, Bar, ContentItem, ContentShape, PowerlineDirection, PowerlineStyle};
+use saftbar::bar::{Alignment, Bar, ContentItem, ContentShape, PowerlineDirection, PowerlineStyle, PowerlineFill};
 
 fn render(bar: &mut Bar) {
     let red = (255, 0, 0, 255);
@@ -9,7 +9,7 @@ fn render(bar: &mut Bar) {
 
     bar.clear_monitors();
 
-    let shape = ContentShape::Powerline(PowerlineStyle::Powerline, PowerlineDirection::Right);
+    let shape = ContentShape::Powerline(PowerlineStyle::Powerline, PowerlineFill::Full, PowerlineDirection::Right);
     bar.draw(
         0,
         Alignment::Left,
@@ -44,7 +44,7 @@ fn render(bar: &mut Bar) {
         ],
     );
 
-    let shape = ContentShape::Powerline(PowerlineStyle::Powerline, PowerlineDirection::Left);
+    let shape = ContentShape::Powerline(PowerlineStyle::Powerline, PowerlineFill::Full, PowerlineDirection::Left);
     bar.draw(
         0,
         Alignment::Right,
@@ -72,7 +72,7 @@ fn render(bar: &mut Bar) {
         ],
     );
 
-    let shape = ContentShape::Powerline(PowerlineStyle::Rounded, PowerlineDirection::Right);
+    let shape = ContentShape::Powerline(PowerlineStyle::Rounded, PowerlineFill::Full, PowerlineDirection::Right);
     bar.draw(
         1,
         Alignment::Left,
@@ -112,7 +112,7 @@ fn render(bar: &mut Bar) {
         ],
     );
 
-    let shape = ContentShape::Powerline(PowerlineStyle::Rounded, PowerlineDirection::Left);
+    let shape = ContentShape::Powerline(PowerlineStyle::Rounded, PowerlineFill::Full, PowerlineDirection::Left);
     bar.draw(
         1,
         Alignment::Right,

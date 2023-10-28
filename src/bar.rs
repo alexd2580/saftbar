@@ -30,6 +30,12 @@ pub enum PowerlineStyle {
 }
 
 #[derive(Clone, Copy)]
+pub enum PowerlineFill {
+    Full,
+    No,
+}
+
+#[derive(Clone, Copy)]
 pub enum PowerlineDirection {
     Left,
     Right,
@@ -38,7 +44,7 @@ pub enum PowerlineDirection {
 #[derive(Clone)]
 pub enum ContentShape {
     Text(String),
-    Powerline(PowerlineStyle, PowerlineDirection),
+    Powerline(PowerlineStyle, PowerlineFill, PowerlineDirection),
 }
 
 #[derive(Clone)]
@@ -227,7 +233,7 @@ impl Bar {
     fn cursor_offset(&self, item: &ContentItem) -> u32 {
         match item.shape {
             ContentShape::Text(ref text) => self.xft.cursor_offset(&text, &self.font),
-            ContentShape::Powerline(_, _) => (self.height - 1) / 2,
+            ContentShape::Powerline(_, _, _) => (self.height - 1) / 2,
         }
     }
 
@@ -266,7 +272,7 @@ impl Bar {
                         cursor_offset,
                     );
                 }
-                ContentShape::Powerline(style, direction) => {
+                ContentShape::Powerline(style, fill, direction) => {
                     let color_gc = self.get_color(*fg);
 
                     // Consult a pixel editor for this.
@@ -292,7 +298,6 @@ impl Bar {
                             vec![(x_l, y_um), (x_l, y_lm), (x_r, y_b), (x_r, y_t)]
                         }
                     };
-                    dbg!(&points);
                     let poly = FillPoly(draw, color_gc, points);
                     self.setup.fill_polys(&[poly]);
                 }
