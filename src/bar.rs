@@ -26,7 +26,7 @@ pub enum Alignment {
 #[derive(Clone, Copy)]
 pub enum PowerlineStyle {
     Powerline,
-    Rounded,
+    Octagon,
 }
 
 #[derive(Clone, Copy)]
@@ -234,7 +234,8 @@ impl Bar {
     fn cursor_offset(&self, item: &ContentItem) -> u32 {
         match &item.shape {
             ContentShape::Text(text) => self.xft.cursor_offset(text, &self.font),
-            ContentShape::Powerline(_, _, _) => (self.height + 1) / 2,
+            ContentShape::Powerline(PowerlineStyle::Powerline, _, _) => (self.height + 1) / 2,
+            ContentShape::Powerline(PowerlineStyle::Octagon, _, _) => self.height / 4 + 1,
         }
     }
 
@@ -282,6 +283,7 @@ impl Bar {
                     // second half of the row.
                     let h = self.height;
                     let h_2 = h / 2;
+                    let h_4 = h / 4;
                     let w = (h + 1) / 2;
 
                     let xl = cursor_offset;
@@ -290,48 +292,129 @@ impl Bar {
                     let yt = 0;
                     let yb = h;
 
-                    // Split the midpoint into two, so that we have exactly 45 deg angles for both
-                    // odd and even vertical sizes.
-                    let upper_mid = yt + h_2;
-                    let kower_mid = yb - h_2;
-
-                    let points = match (direction, fill) {
-                        (PowerlineDirection::Left, PowerlineFill::Full) => {
+                    let points = match (style, direction, fill) {
+                        (
+                            PowerlineStyle::Powerline,
+                            PowerlineDirection::Left,
+                            PowerlineFill::Full,
+                        ) => {
                             vec![vec![
-                                (xl, upper_mid),
-                                (xl, kower_mid - 1),
+                                (xl, yt + h_2),
+                                (xl, yb - h_2 - 1),
                                 (xr, yb),
                                 (xr, yt),
                                 (xr - 1, yt),
                             ]]
                         }
-                        (PowerlineDirection::Right, PowerlineFill::Full) => {
+                        (
+                            PowerlineStyle::Powerline,
+                            PowerlineDirection::Right,
+                            PowerlineFill::Full,
+                        ) => {
                             vec![vec![
                                 (xl, yb),
-                                (xr, kower_mid - 1),
-                                (xr, upper_mid),
+                                (xr, yb - h_2 - 1),
+                                (xr, yt + h_2),
                                 (xl + 1, yt),
                                 (xl, yt),
                             ]]
                         }
-                        (PowerlineDirection::Left, PowerlineFill::No) => {
+                        (
+                            PowerlineStyle::Powerline,
+                            PowerlineDirection::Left,
+                            PowerlineFill::No,
+                        ) => {
                             vec![
-                                vec![(xl, upper_mid), (xl, upper_mid + 1), (xr, yt), (xr - 1, yt)],
+                                vec![(xl, yt + h_2), (xl, yt + h_2 + 1), (xr, yt), (xr - 1, yt)],
                                 vec![
-                                    (xl, kower_mid - 1),
+                                    (xl, yb - h_2 - 1),
                                     (xr, yb),
                                     (xr, yb - 1),
-                                    (xl + 1, kower_mid - 1),
+                                    (xl + 1, yb - h_2 - 1),
                                 ],
                             ]
                         }
-                        (PowerlineDirection::Right, PowerlineFill::No) => {
+                        (
+                            PowerlineStyle::Powerline,
+                            PowerlineDirection::Right,
+                            PowerlineFill::No,
+                        ) => {
                             vec![
-                                vec![(xl, yt), (xr, upper_mid + 1), (xr, upper_mid), (xl + 1, yt)],
+                                vec![(xl, yt), (xr, yt + h_2 + 1), (xr, yt + h_2), (xl + 1, yt)],
                                 vec![
                                     (xl, yb),
-                                    (xr, kower_mid - 1),
-                                    (xr - 1, kower_mid - 1),
+                                    (xr, yb - h_2 - 1),
+                                    (xr - 1, yb - h_2 - 1),
+                                    (xl, yb - 1),
+                                ],
+                            ]
+                        }
+                        (
+                            PowerlineStyle::Octagon,
+                            PowerlineDirection::Left,
+                            PowerlineFill::Full,
+                        ) => {
+                            vec![vec![
+                                (xl, yt + h_4),
+                                (xl, yb - h_4 - 1),
+                                (xl + h_4 + 1, yb),
+                                (xl + h_4 + 1, yt),
+                                (xl + h_4 + 1 - 1, yt),
+                            ]]
+                        }
+                        (
+                            PowerlineStyle::Octagon,
+                            PowerlineDirection::Right,
+                            PowerlineFill::Full,
+                        ) => {
+                            vec![vec![
+                                (xl, yb),
+                                (xl + h_4 + 1, yb - h_4 - 1),
+                                (xl + h_4 + 1, yt + h_4),
+                                (xl + 1, yt),
+                                (xl, yt),
+                            ]]
+                        }
+                        (PowerlineStyle::Octagon, PowerlineDirection::Left, PowerlineFill::No) => {
+                            vec![
+                                vec![
+                                    (xl, yt + h_4),
+                                    (xl, yt + h_4 + 1),
+                                    (xl + h_4 + 1, yt),
+                                    (xl + h_4 + 1 - 1, yt),
+                                ],
+                                vec![
+                                    (xl, yt + h_4),
+                                    (xl, yb - h_4),
+                                    (xl + 1, yb - h_4),
+                                    (xl + 1, yt + h_4),
+                                ],
+                                vec![
+                                    (xl, yb - h_4 - 1),
+                                    (xl + h_4 + 1, yb),
+                                    (xl + h_4 + 1, yb - 1),
+                                    (xl + 1, yb - h_4 - 1),
+                                ],
+                            ]
+                        }
+                        (PowerlineStyle::Octagon, PowerlineDirection::Right, PowerlineFill::No) => {
+                            vec![
+                                vec![
+                                    (xl, yt),
+                                    (xl + h_4 + 1, yt + h_4 + 1),
+                                    (xl + h_4 + 1, yt + h_4),
+                                    (xl + 1, yt),
+                                ],
+                                vec![
+                                    (xl + h_4, yt + h_4),
+                                    (xl + h_4, yb - h_4),
+                                    (xl + h_4 + 1, yb - h_4),
+                                    (xl + h_4 + 1, yt + h_4),
+                                ],
+                                vec![
+                                    (xl, yb),
+                                    (xl + h_4 + 1, yb - h_4 - 1),
+                                    (xl + h_4 + 1 - 1, yb - h_4 - 1),
                                     (xl, yb - 1),
                                 ],
                             ]

@@ -46,6 +46,47 @@ fn render(bar: &mut Bar) {
                 bg: blue,
                 fg: red,
                 shape: ContentShape::Powerline(
+                    PowerlineStyle::Octagon,
+                    PowerlineFill::No,
+                    PowerlineDirection::Left,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Octagon,
+                    PowerlineFill::No,
+                    PowerlineDirection::Right,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Octagon,
+                    PowerlineFill::Full,
+                    PowerlineDirection::Left,
+                ),
+            },
+            ContentItem {
+                bg: black,
+                fg: blue,
+                shape: ContentShape::Text(" ".to_owned()),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Octagon,
+                    PowerlineFill::Full,
+                    PowerlineDirection::Right,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
                     PowerlineStyle::Powerline,
                     PowerlineFill::No,
                     PowerlineDirection::Left,
@@ -129,7 +170,7 @@ fn render(bar: &mut Bar) {
     );
 
     let shape = ContentShape::Powerline(
-        PowerlineStyle::Rounded,
+        PowerlineStyle::Octagon,
         PowerlineFill::Full,
         PowerlineDirection::Right,
     );
@@ -178,7 +219,7 @@ fn render(bar: &mut Bar) {
     );
 
     let shape = ContentShape::Powerline(
-        PowerlineStyle::Rounded,
+        PowerlineStyle::Octagon,
         PowerlineFill::Full,
         PowerlineDirection::Left,
     );
