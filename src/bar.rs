@@ -239,6 +239,152 @@ impl Bar {
         }
     }
 
+    fn shape_powerline(
+        &self,
+        xl: u32,
+        direction: PowerlineDirection,
+        fill: PowerlineFill,
+    ) -> Vec<Vec<(u32, u32)>> {
+        let h = self.height;
+        let h_2 = h / 2;
+
+        let w = (h + 1) / 2;
+        let xr = xl + w;
+
+        let yt = 0;
+        let yb = h;
+
+        match (direction, fill) {
+            (PowerlineDirection::Left, PowerlineFill::Full) => {
+                vec![vec![
+                    (xl, yt + h_2),
+                    (xl, yb - h_2 - 1),
+                    (xr, yb),
+                    (xr, yt),
+                    (xr - 1, yt),
+                ]]
+            }
+            (PowerlineDirection::Right, PowerlineFill::Full) => {
+                vec![vec![
+                    (xl, yb),
+                    (xr, yb - h_2 - 1),
+                    (xr, yt + h_2),
+                    (xl + 1, yt),
+                    (xl, yt),
+                ]]
+            }
+            (PowerlineDirection::Left, PowerlineFill::No) => {
+                vec![
+                    vec![(xl, yt + h_2), (xl, yt + h_2 + 1), (xr, yt), (xr - 1, yt)],
+                    vec![
+                        (xl, yb - h_2 - 1),
+                        (xr, yb),
+                        (xr, yb - 1),
+                        (xl + 1, yb - h_2 - 1),
+                    ],
+                ]
+            }
+            (PowerlineDirection::Right, PowerlineFill::No) => {
+                vec![
+                    vec![(xl, yt), (xr, yt + h_2 + 1), (xr, yt + h_2), (xl + 1, yt)],
+                    vec![
+                        (xl, yb),
+                        (xr, yb - h_2 - 1),
+                        (xr - 1, yb - h_2 - 1),
+                        (xl, yb - 1),
+                    ],
+                ]
+            }
+        }
+    }
+
+    fn shape_octagon(
+        &self,
+        xl: u32,
+        direction: PowerlineDirection,
+        fill: PowerlineFill,
+    ) -> Vec<Vec<(u32, u32)>> {
+        // Consult a pixel editor for this.
+        // We want to use truncating division for odd numbers and get one less than the
+        // half for even numbers. Exactly half would point to the first line in the
+        // second half of the row.
+        let h = self.height;
+        let h_4 = h / 4;
+
+        let xr = xl + h_4 + 1;
+
+        let yt = 0;
+        let yb = h;
+
+        match (direction, fill) {
+            (PowerlineDirection::Left, PowerlineFill::Full) => {
+                vec![vec![
+                    (xl, yt + h_4),
+                    (xl, yb - h_4 - 1),
+                    (xr, yb),
+                    (xr, yt),
+                    (xr - 1, yt),
+                ]]
+            }
+            (PowerlineDirection::Right, PowerlineFill::Full) => {
+                vec![vec![
+                    (xl, yb),
+                    (xr, yb - h_4 - 1),
+                    (xr, yt + h_4),
+                    (xl + 1, yt),
+                    (xl, yt),
+                ]]
+            }
+            (PowerlineDirection::Left, PowerlineFill::No) => {
+                vec![
+                    vec![(xl, yt + h_4), (xl, yt + h_4 + 1), (xr, yt), (xr - 1, yt)],
+                    vec![
+                        (xl, yt + h_4),
+                        (xl, yb - h_4),
+                        (xl + 1, yb - h_4),
+                        (xl + 1, yt + h_4),
+                    ],
+                    vec![
+                        (xl, yb - h_4 - 1),
+                        (xr, yb),
+                        (xr, yb - 1),
+                        (xl + 1, yb - h_4 - 1),
+                    ],
+                ]
+            }
+            (PowerlineDirection::Right, PowerlineFill::No) => {
+                vec![
+                    vec![(xl, yt), (xr, yt + h_4 + 1), (xr, yt + h_4), (xl + 1, yt)],
+                    vec![
+                        (xr - 1, yt + h_4),
+                        (xr - 1, yb - h_4),
+                        (xr, yb - h_4),
+                        (xr, yt + h_4),
+                    ],
+                    vec![
+                        (xl, yb),
+                        (xr, yb - h_4 - 1),
+                        (xr - 1, yb - h_4 - 1),
+                        (xl, yb - 1),
+                    ],
+                ]
+            }
+        }
+    }
+
+    fn shape_polys(
+        &self,
+        xl: u32,
+        style: PowerlineStyle,
+        direction: PowerlineDirection,
+        fill: PowerlineFill,
+    ) -> Vec<Vec<(u32, u32)>> {
+        match style {
+            PowerlineStyle::Powerline => self.shape_powerline(xl, direction, fill),
+            PowerlineStyle::Octagon => self.shape_octagon(xl, direction, fill),
+        }
+    }
+
     pub fn draw(&mut self, monitor_index: usize, alignment: Alignment, items: &[ContentItem]) {
         self.cache_colors(monitor_index, items);
 
@@ -276,151 +422,8 @@ impl Bar {
                 }
                 ContentShape::Powerline(style, fill, direction) => {
                     let color_gc = self.get_color(*fg);
-
-                    // Consult a pixel editor for this.
-                    // We want to use truncating division for odd numbers and get one less than the
-                    // half for even numbers. Exactly half would point to the first line in the
-                    // second half of the row.
-                    let h = self.height;
-                    let h_2 = h / 2;
-                    let h_4 = h / 4;
-                    let w = (h + 1) / 2;
-
-                    let xl = cursor_offset;
-                    let xr = xl + w;
-
-                    let yt = 0;
-                    let yb = h;
-
-                    let points = match (style, direction, fill) {
-                        (
-                            PowerlineStyle::Powerline,
-                            PowerlineDirection::Left,
-                            PowerlineFill::Full,
-                        ) => {
-                            vec![vec![
-                                (xl, yt + h_2),
-                                (xl, yb - h_2 - 1),
-                                (xr, yb),
-                                (xr, yt),
-                                (xr - 1, yt),
-                            ]]
-                        }
-                        (
-                            PowerlineStyle::Powerline,
-                            PowerlineDirection::Right,
-                            PowerlineFill::Full,
-                        ) => {
-                            vec![vec![
-                                (xl, yb),
-                                (xr, yb - h_2 - 1),
-                                (xr, yt + h_2),
-                                (xl + 1, yt),
-                                (xl, yt),
-                            ]]
-                        }
-                        (
-                            PowerlineStyle::Powerline,
-                            PowerlineDirection::Left,
-                            PowerlineFill::No,
-                        ) => {
-                            vec![
-                                vec![(xl, yt + h_2), (xl, yt + h_2 + 1), (xr, yt), (xr - 1, yt)],
-                                vec![
-                                    (xl, yb - h_2 - 1),
-                                    (xr, yb),
-                                    (xr, yb - 1),
-                                    (xl + 1, yb - h_2 - 1),
-                                ],
-                            ]
-                        }
-                        (
-                            PowerlineStyle::Powerline,
-                            PowerlineDirection::Right,
-                            PowerlineFill::No,
-                        ) => {
-                            vec![
-                                vec![(xl, yt), (xr, yt + h_2 + 1), (xr, yt + h_2), (xl + 1, yt)],
-                                vec![
-                                    (xl, yb),
-                                    (xr, yb - h_2 - 1),
-                                    (xr - 1, yb - h_2 - 1),
-                                    (xl, yb - 1),
-                                ],
-                            ]
-                        }
-                        (
-                            PowerlineStyle::Octagon,
-                            PowerlineDirection::Left,
-                            PowerlineFill::Full,
-                        ) => {
-                            vec![vec![
-                                (xl, yt + h_4),
-                                (xl, yb - h_4 - 1),
-                                (xl + h_4 + 1, yb),
-                                (xl + h_4 + 1, yt),
-                                (xl + h_4 + 1 - 1, yt),
-                            ]]
-                        }
-                        (
-                            PowerlineStyle::Octagon,
-                            PowerlineDirection::Right,
-                            PowerlineFill::Full,
-                        ) => {
-                            vec![vec![
-                                (xl, yb),
-                                (xl + h_4 + 1, yb - h_4 - 1),
-                                (xl + h_4 + 1, yt + h_4),
-                                (xl + 1, yt),
-                                (xl, yt),
-                            ]]
-                        }
-                        (PowerlineStyle::Octagon, PowerlineDirection::Left, PowerlineFill::No) => {
-                            vec![
-                                vec![
-                                    (xl, yt + h_4),
-                                    (xl, yt + h_4 + 1),
-                                    (xl + h_4 + 1, yt),
-                                    (xl + h_4 + 1 - 1, yt),
-                                ],
-                                vec![
-                                    (xl, yt + h_4),
-                                    (xl, yb - h_4),
-                                    (xl + 1, yb - h_4),
-                                    (xl + 1, yt + h_4),
-                                ],
-                                vec![
-                                    (xl, yb - h_4 - 1),
-                                    (xl + h_4 + 1, yb),
-                                    (xl + h_4 + 1, yb - 1),
-                                    (xl + 1, yb - h_4 - 1),
-                                ],
-                            ]
-                        }
-                        (PowerlineStyle::Octagon, PowerlineDirection::Right, PowerlineFill::No) => {
-                            vec![
-                                vec![
-                                    (xl, yt),
-                                    (xl + h_4 + 1, yt + h_4 + 1),
-                                    (xl + h_4 + 1, yt + h_4),
-                                    (xl + 1, yt),
-                                ],
-                                vec![
-                                    (xl + h_4, yt + h_4),
-                                    (xl + h_4, yb - h_4),
-                                    (xl + h_4 + 1, yb - h_4),
-                                    (xl + h_4 + 1, yt + h_4),
-                                ],
-                                vec![
-                                    (xl, yb),
-                                    (xl + h_4 + 1, yb - h_4 - 1),
-                                    (xl + h_4 + 1 - 1, yb - h_4 - 1),
-                                    (xl, yb - 1),
-                                ],
-                            ]
-                        }
-                    };
-                    let polys = points
+                    let polys = self
+                        .shape_polys(cursor_offset, *style, *direction, *fill)
                         .into_iter()
                         .map(|points| FillPoly(draw, color_gc, points))
                         .collect::<Vec<_>>();
