@@ -67,6 +67,7 @@ pub struct Bar {
 }
 
 impl Bar {
+    #[must_use]
     pub fn new() -> Self {
         let setup = Setup::new();
         let valid_regions = setup.query_valid_crtc_regions();
@@ -231,9 +232,9 @@ impl Bar {
     }
 
     fn cursor_offset(&self, item: &ContentItem) -> u32 {
-        match item.shape {
-            ContentShape::Text(ref text) => self.xft.cursor_offset(&text, &self.font),
-            ContentShape::Powerline(_, _, _) => (self.height - 1) / 2,
+        match &item.shape {
+            ContentShape::Text(text) => self.xft.cursor_offset(text, &self.font),
+            ContentShape::Powerline(_, _, _) => (self.height + 1) / 2,
         }
     }
 
@@ -279,27 +280,68 @@ impl Bar {
                     // We want to use truncating division for odd numbers and get one less than the
                     // half for even numbers. Exactly half would point to the first line in the
                     // second half of the row.
-                    let h = (self.height - 1) / 2;
+                    let h = self.height;
+                    let h_2 = h / 2;
+                    let w = (h + 1) / 2;
 
-                    let x_l = cursor_offset;
-                    let x_r = x_l + h;
-                    let y_t = 0;
-                    let y_b = self.height - 1;
+                    let xl = cursor_offset;
+                    let xr = xl + w;
+
+                    let yt = 0;
+                    let yb = h;
+
                     // Split the midpoint into two, so that we have exactly 45 deg angles for both
                     // odd and even vertical sizes.
-                    let y_um = y_t + h;
-                    let y_lm = y_b - h;
+                    let upper_mid = yt + h_2;
+                    let kower_mid = yb - h_2;
 
-                    let points = match direction {
-                        PowerlineDirection::Right => {
-                            vec![(x_l, y_t), (x_l, y_b), (x_r, y_lm), (x_r, y_um)]
+                    let points = match (direction, fill) {
+                        (PowerlineDirection::Left, PowerlineFill::Full) => {
+                            vec![vec![
+                                (xl, upper_mid),
+                                (xl, kower_mid - 1),
+                                (xr, yb),
+                                (xr, yt),
+                                (xr - 1, yt),
+                            ]]
                         }
-                        PowerlineDirection::Left => {
-                            vec![(x_l, y_um), (x_l, y_lm), (x_r, y_b), (x_r, y_t)]
+                        (PowerlineDirection::Right, PowerlineFill::Full) => {
+                            vec![vec![
+                                (xl, yb),
+                                (xr, kower_mid - 1),
+                                (xr, upper_mid),
+                                (xl + 1, yt),
+                                (xl, yt),
+                            ]]
+                        }
+                        (PowerlineDirection::Left, PowerlineFill::No) => {
+                            vec![
+                                vec![(xl, upper_mid), (xl, upper_mid + 1), (xr, yt), (xr - 1, yt)],
+                                vec![
+                                    (xl, kower_mid - 1),
+                                    (xr, yb),
+                                    (xr, yb - 1),
+                                    (xl + 1, kower_mid - 1),
+                                ],
+                            ]
+                        }
+                        (PowerlineDirection::Right, PowerlineFill::No) => {
+                            vec![
+                                vec![(xl, yt), (xr, upper_mid + 1), (xr, upper_mid), (xl + 1, yt)],
+                                vec![
+                                    (xl, yb),
+                                    (xr, kower_mid - 1),
+                                    (xr - 1, kower_mid - 1),
+                                    (xl, yb - 1),
+                                ],
+                            ]
                         }
                     };
-                    let poly = FillPoly(draw, color_gc, points);
-                    self.setup.fill_polys(&[poly]);
+                    let polys = points
+                        .into_iter()
+                        .map(|points| FillPoly(draw, color_gc, points))
+                        .collect::<Vec<_>>();
+                    self.setup.fill_polys(&polys);
                 }
             }
 
