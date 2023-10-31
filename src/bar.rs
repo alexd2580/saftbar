@@ -234,8 +234,8 @@ impl Bar {
     fn cursor_offset(&self, item: &ContentItem) -> u32 {
         match &item.shape {
             ContentShape::Text(text) => self.xft.cursor_offset(text, &self.font),
-            ContentShape::Powerline(PowerlineStyle::Powerline, _, _) => (self.height + 1) / 2,
-            ContentShape::Powerline(PowerlineStyle::Octagon, _, _) => self.height / 4 + 1,
+            ContentShape::Powerline(_, _, _) => (self.height + 1) / 2,
+            // ContentShape::Powerline(PowerlineStyle::Octagon, _, _) => self.height / 4 + 1,
         }
     }
 
@@ -308,66 +308,79 @@ impl Bar {
         // We want to use truncating division for odd numbers and get one less than the
         // half for even numbers. Exactly half would point to the first line in the
         // second half of the row.
+
         let h = self.height;
         let h_4 = h / 4;
-
-        let xr = xl + h_4 + 1;
 
         let yt = 0;
         let yb = h;
 
-        match (direction, fill) {
-            (PowerlineDirection::Left, PowerlineFill::Full) => {
-                vec![vec![
-                    (xl, yt + h_4),
-                    (xl, yb - h_4 - 1),
-                    (xr, yb),
-                    (xr, yt),
-                    (xr - 1, yt),
-                ]]
+        match direction {
+            PowerlineDirection::Right => {
+                let xr = xl + h_4 + 1;
+
+                match fill {
+                    PowerlineFill::Full => {
+                        vec![vec![
+                            (xl, yb),
+                            (xr, yb - h_4 - 1),
+                            (xr, yt + h_4),
+                            (xl + 1, yt),
+                            (xl, yt),
+                        ]]
+                    }
+                    PowerlineFill::No => {
+                        vec![
+                            vec![(xl, yt), (xr, yt + h_4 + 1), (xr, yt + h_4), (xl + 1, yt)],
+                            vec![
+                                (xr - 1, yt + h_4),
+                                (xr - 1, yb - h_4),
+                                (xr, yb - h_4),
+                                (xr, yt + h_4),
+                            ],
+                            vec![
+                                (xl, yb),
+                                (xr, yb - h_4 - 1),
+                                (xr - 1, yb - h_4 - 1),
+                                (xl, yb - 1),
+                            ],
+                        ]
+                    }
+                }
             }
-            (PowerlineDirection::Right, PowerlineFill::Full) => {
-                vec![vec![
-                    (xl, yb),
-                    (xr, yb - h_4 - 1),
-                    (xr, yt + h_4),
-                    (xl + 1, yt),
-                    (xl, yt),
-                ]]
-            }
-            (PowerlineDirection::Left, PowerlineFill::No) => {
-                vec![
-                    vec![(xl, yt + h_4), (xl, yt + h_4 + 1), (xr, yt), (xr - 1, yt)],
-                    vec![
-                        (xl, yt + h_4),
-                        (xl, yb - h_4),
-                        (xl + 1, yb - h_4),
-                        (xl + 1, yt + h_4),
-                    ],
-                    vec![
-                        (xl, yb - h_4 - 1),
-                        (xr, yb),
-                        (xr, yb - 1),
-                        (xl + 1, yb - h_4 - 1),
-                    ],
-                ]
-            }
-            (PowerlineDirection::Right, PowerlineFill::No) => {
-                vec![
-                    vec![(xl, yt), (xr, yt + h_4 + 1), (xr, yt + h_4), (xl + 1, yt)],
-                    vec![
-                        (xr - 1, yt + h_4),
-                        (xr - 1, yb - h_4),
-                        (xr, yb - h_4),
-                        (xr, yt + h_4),
-                    ],
-                    vec![
-                        (xl, yb),
-                        (xr, yb - h_4 - 1),
-                        (xr - 1, yb - h_4 - 1),
-                        (xl, yb - 1),
-                    ],
-                ]
+            PowerlineDirection::Left => {
+                let w = (self.height + 1) / 2;
+                let xr = xl + w;
+                let xl = xr - h_4 - 1;
+
+                match fill {
+                    PowerlineFill::Full => {
+                        vec![vec![
+                            (xl, yt + h_4),
+                            (xl, yb - h_4 - 1),
+                            (xr, yb),
+                            (xr, yt),
+                            (xr - 1, yt),
+                        ]]
+                    }
+                    PowerlineFill::No => {
+                        vec![
+                            vec![(xl, yt + h_4), (xl, yt + h_4 + 1), (xr, yt), (xr - 1, yt)],
+                            vec![
+                                (xl, yt + h_4),
+                                (xl, yb - h_4),
+                                (xl + 1, yb - h_4),
+                                (xl + 1, yt + h_4),
+                            ],
+                            vec![
+                                (xl, yb - h_4 - 1),
+                                (xr, yb),
+                                (xr, yb - 1),
+                                (xl + 1, yb - h_4 - 1),
+                            ],
+                        ]
+                    }
+                }
             }
         }
     }
