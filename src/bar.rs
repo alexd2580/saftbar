@@ -20,6 +20,7 @@ struct Monitor {
 #[derive(Copy, Clone)]
 pub enum Alignment {
     Left,
+    Center,
     Right,
 }
 
@@ -411,6 +412,7 @@ impl Bar {
         // Where i start rendering depends on the alignment and the width of the content.
         let mut cursor_offset = match alignment {
             Alignment::Left => 0,
+            Alignment::Center => (monitor_width - item_widths.iter().sum::<u32>()) / 2,
             Alignment::Right => monitor_width - item_widths.iter().sum::<u32>(),
         };
 
