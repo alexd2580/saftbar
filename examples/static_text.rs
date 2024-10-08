@@ -1,6 +1,139 @@
 use saftbar::bar::{
     Alignment, Bar, ContentItem, ContentShape, PowerlineDirection, PowerlineFill, PowerlineStyle,
 };
+use std::env;
+
+fn render_text(bar: &mut Bar, text: &String) {
+    let red = (255, 0, 0, 255);
+    let blue = (0, 0, 255, 255);
+    let black = (0, 0, 0, 255);
+    let white = (255, 255, 255, 255);
+    let green = (0, 255, 0, 255);
+
+    let shape = ContentShape::Powerline(
+        PowerlineStyle::Powerline,
+        PowerlineFill::Full,
+        PowerlineDirection::Right,
+    );
+    bar.draw(
+        0,
+        Alignment::Left,
+        &[
+            ContentItem {
+                bg: red,
+                fg: black,
+                shape: shape.clone(),
+            },
+            ContentItem {
+                bg: red,
+                fg: white,
+                shape: ContentShape::Text(text.to_owned()),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: shape.clone(),
+            },
+            ContentItem {
+                bg: blue,
+                fg: black,
+                shape: ContentShape::Text(text.to_owned()),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Octagon,
+                    PowerlineFill::No,
+                    PowerlineDirection::Left,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Octagon,
+                    PowerlineFill::No,
+                    PowerlineDirection::Right,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Octagon,
+                    PowerlineFill::Full,
+                    PowerlineDirection::Left,
+                ),
+            },
+            ContentItem {
+                bg: black,
+                fg: blue,
+                shape: ContentShape::Text(text.to_owned()),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Octagon,
+                    PowerlineFill::Full,
+                    PowerlineDirection::Right,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Powerline,
+                    PowerlineFill::No,
+                    PowerlineDirection::Left,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Powerline,
+                    PowerlineFill::No,
+                    PowerlineDirection::Right,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Powerline,
+                    PowerlineFill::Full,
+                    PowerlineDirection::Left,
+                ),
+            },
+            ContentItem {
+                bg: black,
+                fg: blue,
+                shape: ContentShape::Text(text.to_owned()),
+            },
+            ContentItem {
+                bg: blue,
+                fg: red,
+                shape: ContentShape::Powerline(
+                    PowerlineStyle::Powerline,
+                    PowerlineFill::Full,
+                    PowerlineDirection::Right,
+                ),
+            },
+            ContentItem {
+                bg: blue,
+                fg: black,
+                shape: ContentShape::Text(text.to_owned()),
+            },
+            ContentItem {
+                bg: black,
+                fg: blue,
+                shape: shape.clone(),
+            },
+        ],
+    );
+}
 
 fn render(bar: &mut Bar) {
     let red = (255, 0, 0, 255);
@@ -8,8 +141,6 @@ fn render(bar: &mut Bar) {
     let black = (0, 0, 0, 255);
     let white = (255, 255, 255, 255);
     let green = (0, 255, 0, 255);
-
-    bar.clear_monitors();
 
     let shape = ContentShape::Powerline(
         PowerlineStyle::Powerline,
@@ -257,8 +388,18 @@ fn render(bar: &mut Bar) {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let custom_text = (args.len() > 1).then(|| &args[1]);
+
     let mut bar = Bar::new();
-    render(&mut bar);
+    bar.clear_monitors();
+
+    if let Some(text) = custom_text {
+        render_text(&mut bar, text);
+    } else {
+        render(&mut bar);
+    }
+
     bar.present();
     bar.flush();
     std::thread::sleep(std::time::Duration::from_secs(10));
